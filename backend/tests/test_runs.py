@@ -199,9 +199,19 @@ def fake_modules(monkeypatch: pytest.MonkeyPatch, calls: dict, **overrides) -> N
     def find_duplicate_candidates(functions, k=5):
         return [(functions[0], functions[1], 0.7)]
 
-    def verify_matches(before, after, candidates, llm, after_clauses=None):
+    def verify_matches(
+        before,
+        after,
+        candidates,
+        llm,
+        after_clauses=None,
+        *,
+        before_clauses=None,
+        unit_changes=None,
+    ):
         assert all(f.modality != "prohibition" for f in before)
         assert after_clauses, "пункты «после» передаются для confirm_loss"
+        calls["verify_context"] = (before_clauses, unit_changes)
         f1, g1 = before[0], after[0]
         invented = f1.sources[0].model_copy(update={"clause_number": "9.9.9"})
         return [
@@ -231,8 +241,9 @@ def fake_modules(monkeypatch: pytest.MonkeyPatch, calls: dict, **overrides) -> N
             ),
         ]
 
-    def find_duplicates(functions_by_unit, llm, candidate_pairs=None):
+    def find_duplicates(functions_by_unit, llm, candidate_pairs=None, *, unit_names=None):
         calls["duplicate_pairs"] = candidate_pairs
+        calls["duplicate_unit_names"] = unit_names
         a, b, score = candidate_pairs[0]
         return [
             Duplicate(
@@ -246,8 +257,9 @@ def fake_modules(monkeypatch: pytest.MonkeyPatch, calls: dict, **overrides) -> N
             )
         ]
 
-    def find_conflicts(functions_by_unit, llm, constraints=None):
+    def find_conflicts(functions_by_unit, llm, constraints=None, *, unit_names=None):
         calls["constraints"] = [c.id for c in constraints or []]
+        calls["conflict_unit_names"] = unit_names
         f = functions_by_unit["u9"][0]
         return [
             Conflict(
@@ -385,6 +397,12 @@ def test_all_steps_present_gives_done(client: TestClient, monkeypatch: pytest.Mo
     assert sorted(c.id for c in report.constraints) == ["p8", "p9"]
     assert calls["constraints"] == ["p9"]
     assert calls["duplicate_pairs"] and calls["facts"] == {"findings": 2}
+    # S10 получает пункты «до» и карту подразделений, S11 — названия подразделений.
+    before_clauses, unit_changes = calls["verify_context"]
+    assert [c.number for c in before_clauses] == ["1.1", "2.4.1", "2.4.2", "5.9.1"]
+    assert [c.id for c in unit_changes] == ["uc1"]
+    names = {"u8": "БВА", "u9": "БВА"}
+    assert calls["duplicate_unit_names"] == calls["conflict_unit_names"] == names
     assert report.conclusion_md == "Функции сохранены [F1]."
     assert report.recommendations == ["Проверить [F2]"]
     stats = report.stats
@@ -474,7 +492,7 @@ def test_missing_mock_fixture_is_error_with_key_hint(
 def test_step_exception_is_partial_and_process_survives(
     client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    def find_conflicts(functions_by_unit, llm, constraints=None):
+    def find_conflicts(functions_by_unit, llm, constraints=None, **_):
         raise KeyError("u9")
 
     fake_modules(monkeypatch, {}, conflicts={"find_conflicts": find_conflicts})
@@ -570,7 +588,7 @@ def _match(mid: str, before: list[Function], after: list[Function], sources: lis
 def test_source_check_verifies_quote_clause_id_and_both_sides(
     client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    def verify_matches(before, after, candidates, llm, after_clauses=None):
+    def verify_matches(before, after, candidates, llm, after_clauses=None, **_):
         f1, f2 = before[0], before[1]
         g1, g2 = after[0], after[1]
         real = f1.sources[0]  # d8, п. 2.4.1

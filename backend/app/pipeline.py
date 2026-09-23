@@ -33,6 +33,7 @@ from app import store
 from app.config import get_settings
 from app.llm import LLM, LLMError, redact_secrets
 from app.schemas import (
+    Clause,
     Conflict,
     Constraint,
     Document,
@@ -289,14 +290,16 @@ async def _verification(run: _Run) -> None:
     в отчёте кандидатом с verified=false."""
     try:
         verify_matches = _function(_module("matching"), "verify_matches")
-        after_clauses = [clause for doc in run.docs["after"] for clause in doc.clauses]
         matches = await asyncio.to_thread(
             verify_matches,
             run.functions["before"],
             run.functions["after"],
             run.candidates,
             run.llm,
-            after_clauses,
+            _clauses(run, "after"),
+            # Контекст функций «до» и карта подразделений S05: без них S10 не видит `moved`.
+            before_clauses=_clauses(run, "before"),
+            unit_changes=run.unit_changes,
         )
         run.matches = _sourced(
             _coerce(FunctionMatch, matches, "сопоставление"), run, "сопоставление"
@@ -306,7 +309,11 @@ async def _verification(run: _Run) -> None:
     try:
         find_duplicates = _function(_module("duplicates"), "find_duplicates")
         duplicates = await asyncio.to_thread(
-            find_duplicates, _by_unit(run.functions["after"]), run.llm, run.duplicate_pairs
+            find_duplicates,
+            _by_unit(run.functions["after"]),
+            run.llm,
+            run.duplicate_pairs,
+            unit_names=_unit_names(run),
         )
         run.duplicates = _sourced(_coerce(Duplicate, duplicates, "дубль"), run, "дубль")
     except StepSkipped as exc:
@@ -315,8 +322,13 @@ async def _verification(run: _Run) -> None:
 
 async def _conflicts(run: _Run) -> None:
     find_conflicts = _function(_module("conflicts"), "find_conflicts")
+    # Имена подразделений нужны правилам S11: самоконтроль (d) узнаётся по названию.
     conflicts = await asyncio.to_thread(
-        find_conflicts, _by_unit(run.functions["after"]), run.llm, run.constraints["after"]
+        find_conflicts,
+        _by_unit(run.functions["after"]),
+        run.llm,
+        run.constraints["after"],
+        unit_names=_unit_names(run),
     )
     run.conflicts = _sourced(_coerce(Conflict, conflicts, "конфликт"), run, "конфликт")
 
@@ -421,6 +433,20 @@ def _units_by_version(changes: list[UnitChange]) -> dict[str, list[Any]]:
         if change.unit_after is not None:
             units["after"].setdefault(change.unit_after.id, change.unit_after)
     return {version: list(items.values()) for version, items in units.items()}
+
+
+def _clauses(run: _Run, version: str) -> list[Clause]:
+    return [clause for doc in run.docs[version] for clause in doc.clauses]
+
+
+def _unit_names(run: _Run) -> dict[str, str]:
+    """Unit.id → название, обе версии: `Function.unit_id` сам по себе непрозрачен."""
+    return {
+        unit.id: unit.name
+        for change in run.unit_changes
+        for unit in (change.unit_before, change.unit_after)
+        if unit is not None
+    }
 
 
 def _by_unit(functions: list[Function]) -> dict[str, list[Function]]:
