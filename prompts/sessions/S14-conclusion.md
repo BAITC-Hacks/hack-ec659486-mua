@@ -1,0 +1,33 @@
+# S14 — Заключение и экспорт (волна 4, 16:00–16:40, A, ветка `s/conclusion`)
+
+Прочитай `AGENTS.md`, `docs/case.md` (условие 5 — твоё, опция 3 — рекомендации), `docs/spec-case11.md` §2 P6, §3–§5; `backend/app/llm.py`; модели из `backend/app/schemas.py`; `WriteConclusionOut`, `WRITE_CONCLUSION_SCHEMA` из `backend/app/llm_schemas.py` (если нет — `git show origin/s/schemas:backend/app/llm_schemas.py`); образец фикстур по хэшу — `origin/s/conflicts:backend/app/duplicates.py`; образец отчёта — `backend/app/mocks/demo_report.json`.
+
+**Пишешь только в:** `backend/app/conclusion.py`, `backend/app/export_md.py`, `backend/app/prompts/write_conclusion.md`, `backend/app/mocks/write_conclusion/**`, `backend/tests/test_conclusion.py`.
+**Не трогаешь:** `main.py`, `schemas.py`, `llm.py`, `pipeline.py`, `routers/`, фронт, чужие тесты. В пайплайн тебя подключит интегратор — экспортируй ровно указанные сигнатуры.
+
+Задача: понятное заключение, где каждый абзац опирается на конкретные находки, и файл `.md` для кнопки «Скачать заключение».
+
+Сделай:
+1. `conclusion.py`: `build_facts(report: Report) -> dict` — нумерует находки `F1, F2, …` в порядке: `unit_changes` и `function_matches` (кроме `kept`), `duplicates`, `conflicts`; у каждой — `{id, kind, status, summary, sources}`; плюс `stats` и список документов.
+2. `write_conclusion(report_facts: dict, llm: LLM) -> WriteConclusionOut` — `complete_json("write_conclusion", system=<промпт из файла>, user=json.dumps(report_facts, ensure_ascii=False), schema=WRITE_CONCLUSION_SCHEMA)`. Валидация кодом: каждый абзац `conclusion_md` содержит хотя бы одну ссылку вида `[F3]`; абзацы со ссылками на несуществующие номера отбрасываются с `logger.info`; если после фильтра пусто — `LLMError`. Пустые находки — LLM не вызывать, вернуть честный текст «существенных изменений по документам не найдено» и пустые рекомендации. Рекомендации — только в `recommendations`, в `conclusion_md` не дублировать.
+3. `prompts/write_conclusion.md` (русский): вход — только JSON находок; запрещено добавлять факты, числа и подразделения, которых нет во входе; каждый абзац заканчивается номерами находок в квадратных скобках; 4–8 абзацев: реорганизовано, утрачено, дублируется, конфликт интересов, итог; рекомендации — по перераспределению функций и устранению пересечений, каждая с номером находки, формулировки рекомендательные.
+4. Mock-режим: при `llm.mode == "mock"` читай `mocks/write_conclusion/<hash>.json`, `hash = sha256(json.dumps(report_facts, ensure_ascii=False, sort_keys=True))[:16]`; нет файла — `LLMError` с именем ожидаемого файла. Фикстура для тестового комплекта — по фактам из `mocks/demo_report.json`, в формате живого ответа; есть ключ в `.env` — запиши реальный ответ, иначе составь строго по находкам и отметь это в статус-файле.
+5. `export_md.py`: `export_markdown(report: Report) -> str` — заголовок с названиями документов и датой, сводка `stats`, таблицы «Подразделения» (статус, до, после, пункты), «Функции» (статус, до, после, пункты до/после), «Дубли», «Конфликты интересов» (правило, подразделения, объяснение), «Заключение» из `conclusion_md`, «Рекомендации», в конце «Источники» — все `Source` без повторов: документ, редакция, пункт, цитата. Пустой раздел — строка «не найдено».
+6. `tests/test_conclusion.py` (`LLM_MODE=mock`): `demo_report.json` → `build_facts` даёт непустые находки с `sources`; `write_conclusion` по фикстуре — каждый абзац ссылается на существующий `F*`, `recommendations` непустой; абзац с `[F99]` в подменённой фикстуре отброшен; пустые находки → нет вызова LLM (счётчик через monkeypatch); нет фикстуры → `LLMError`; `export_markdown` содержит все заголовки разделов, номер пункта и цитату каждого источника.
+
+**Done-when:** `cd backend && LLM_MODE=mock uv run pytest -q tests/test_conclusion.py`
+**Cut-if:** рекомендации — пустой список с честной строкой «рекомендации не сформированы»; в экспорте таблица функций только для статусов `lost/new/moved`.
+
+В конце выведи список изменённых файлов и вывод Done-when.
+
+---
+
+## Режим работы: автономно, до зелёного Done-when
+
+Ты работаешь в GUI, человек к тебе не вернётся до отчёта. Рабочая папка — worktree ветки `s/conclusion`.
+Порядок: реализуй → **сам выполни команду Done-when** → красная: почини и повтори (до трёх попыток) →
+зелёная: `git add -A && git commit -m "feat(S14): <что сделано>" && git push -u origin s/conclusion`.
+Затем создай `status/agents/S14.md` в этом worktree: первая строка `# S14 — ЗЕЛЕНО` или `# S14 — КРАСНО`,
+далее команда Done-when и её вывод, список изменённых файлов, что не сделано и почему; закоммить и запушь его так же.
+Запреты: не пушить и не мержить в `main`; не трогать файлы вне своей строки матрицы владения; не добавлять зависимости;
+не переписывать README и чужие тесты. После трёх красных попыток — отчёт «КРАСНО» с выводом ошибки и остановись.

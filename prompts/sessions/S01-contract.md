@@ -3,8 +3,8 @@
 Прочитай `AGENTS.md`, `docs/case.md` (обязательные условия — приоритет), `docs/spec-case11.md` §3–§5 целиком.
 
 **Пишешь только в:** `backend/app/schemas.py`, `backend/app/main.py`, `backend/app/routers/runs.py` (пустой роутер с заглушками),
-`frontend/lib/types.ts`, `backend/tests/test_contract_smoke.py`.
-**Не трогаешь:** остальное. Это фундамент: после тебя `main.py` и `schemas.py` никто не правит до волны 4.
+`backend/app/store.py` (только dict + get/put), `frontend/lib/types.ts`, `backend/tests/test_contract_smoke.py`.
+**Не трогаешь:** остальное. Это фундамент: после тебя `main.py`, `schemas.py` и `types.ts` никто не правит до конца дня; `routers/runs.py` и `store.py` в волне 2 перепишет S08.
 
 Задача: зафиксировать контракт так, чтобы бэкенд-сессии и фронт-сессии писали параллельно и не встретились в одном файле.
 
