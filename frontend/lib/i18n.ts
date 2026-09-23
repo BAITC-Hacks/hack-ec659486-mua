@@ -25,7 +25,6 @@ const ru = {
   back: "Назад",
   home: "На главную",
   search: "Поиск",
-  students: "Студенты",
   risk: "Риск",
   plan: "План",
 } as const;
@@ -46,7 +45,6 @@ const kk: Record<I18nKey, string> = {
   back: "Артқа",
   home: "Басты бетке",
   search: "Іздеу",
-  students: "Студенттер",
   risk: "Тәуекел",
   plan: "Жоспар",
 };
