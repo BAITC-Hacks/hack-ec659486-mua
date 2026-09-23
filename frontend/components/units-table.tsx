@@ -10,16 +10,27 @@ export type SourceHandler = (source: Source) => void;
 export function SourceButtons({ sources, onSource }: { sources: Source[]; onSource: SourceHandler }) {
   const unique = sources.filter((source, index) => sources.findIndex((other) =>
     other.doc_id === source.doc_id && other.clause_id === source.clause_id) === index);
-  return (
-    <div className="flex flex-wrap gap-2">
-      {unique.map((source) => (
+  const sourceButton = (source: Source) => (
         <Button key={`${source.doc_id}-${source.clause_id}`} size="sm" variant="secondary"
           title={`${source.version === "before" ? "До" : "После"}: ${source.doc_name}`}
           aria-label={`п. ${source.clause_number ?? "без номера"}, ${source.version === "before" ? "до" : "после"}, ${source.doc_name}`}
           onClick={() => onSource(source)}>
           п. {source.clause_number ?? "без номера"}
         </Button>
-      ))}
+  );
+  return (
+    <div className="space-y-2">
+      <div className="flex flex-wrap gap-2">{unique.slice(0, 3).map(sourceButton)}</div>
+      {unique.length > 3 && (
+        <details>
+          <summary className="cursor-pointer text-sm text-muted-foreground">
+            Ещё источники ({unique.length - 3})
+          </summary>
+          <div className="mt-2 flex max-h-60 flex-wrap gap-2 overflow-y-auto">
+            {unique.slice(3).map(sourceButton)}
+          </div>
+        </details>
+      )}
     </div>
   );
 }
