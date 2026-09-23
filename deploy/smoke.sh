@@ -65,6 +65,17 @@ python3 -c 'import json,sys; r=json.load(sys.stdin); required=("unit_changes","f
 MARKDOWN=$(curl -fsS "$BACKEND/api/runs/$RUN_ID/report.md") || fail "экспорт .md недоступен"
 [ -n "$MARKDOWN" ] || fail "экспорт .md пуст"
 
+echo "== backend: PDF отклоняется как неподдерживаемый формат"
+PDF_RESPONSE=$(curl -sS -w '\n%{http_code}' -X POST "$BACKEND/api/runs" \
+  -F 'before[]=@backend/tests/test_e2e_mock.py;filename=before.pdf;type=application/pdf' \
+  -F 'after[]=@backend/tests/test_e2e_mock.py;filename=after.pdf;type=application/pdf') || \
+  fail "не удалось проверить отказ на PDF"
+PDF_CODE=${PDF_RESPONSE##*$'\n'}
+PDF_BODY=${PDF_RESPONSE%$'\n'*}
+[ "$PDF_CODE" = "422" ] || fail "PDF-загрузка дала HTTP $PDF_CODE вместо 422"
+python3 -c 'import json,sys; sys.exit(json.load(sys.stdin).get("error") != "unsupported_format")' \
+  <<<"$PDF_BODY" || fail "PDF отклонён с неверным кодом ошибки: $PDF_BODY"
+
 echo "== backend: ошибки не раскрывают внутренности"
 NOT_FOUND=$(curl -s "$BACKEND/api/does-not-exist")
 if grep -qiE 'traceback|sk-[A-Za-z0-9]' <<<"$NOT_FOUND"; then
