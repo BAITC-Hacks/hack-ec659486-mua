@@ -49,3 +49,4 @@ setup/install.log
 *.zip
 data/case11/*.txt
 backend/data/runs/
+backend/runtime/
