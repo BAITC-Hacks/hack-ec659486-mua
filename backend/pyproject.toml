@@ -29,6 +29,7 @@ dev = [
 package = false
 
 [tool.ruff]
+extend-exclude = ["app/prebuilt"]
 line-length = 100
 target-version = "py312"
 src = ["."]
