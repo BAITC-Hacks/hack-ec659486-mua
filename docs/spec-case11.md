@@ -7,37 +7,52 @@
 ## 1. Демо-путь (единственный, работает в mock-режиме без ключа)
 
 1. `/` — загрузить «до» (1..n файлов .docx) и «после» (1..n .docx) **или** нажать «Тестовый комплект» (редакции 8 и 9 Положения о внутреннем аудите из `data/case11/`).
-2. Кнопка «Проанализировать» → прогресс по шагам: разбор → подразделения → функции → сопоставление → заключение.
-3. `/report/{run_id}` — вкладки: **Подразделения** (сохранено / преобразовано / создано / упразднено, с пунктами-источниками), **Функции** (таблица сопоставления до↔после: сохранена / изменена / утрачена / новая / перенесена, каждая строка со ссылкой на пункт до и после), **Дубли и конфликты** (пары подразделений с одинаковой функцией; конфликты интересов с правилом и пунктами), **Заключение** (текст для пользователя + рекомендации) и кнопка «Скачать заключение (.md)».
+2. Кнопка «Проанализировать» → прогресс по шагам: разбор → подразделения → функции → кандидаты → проверка → конфликты → заключение.
+3. `/report/{run_id}` — вкладки: **Подразделения** (сохранено / преобразовано / создано / упразднено, с пунктами-источниками), **Функции** (таблица сопоставления до↔после: сохранена / изменена / утрачена / новая / перенесена, связи один-ко-многим, каждая строка со ссылкой на пункты до и после; отдельные списки «Ограничения» (запреты) и «Кандидаты в потери — требует проверки»), **Дубли и конфликты** (пары подразделений с одинаковой функцией, только проверенные; конфликты интересов с правилом, шаблоном ролей и пунктами обеих сторон), **Заключение** (текст для пользователя + рекомендации) и кнопка «Скачать заключение (.md)».
 4. Клик по любой ссылке-источнику открывает панель с текстом пункта из документа (документ, редакция, номер пункта, цитата).
 
 ## 2. Пайплайн (детерминированное — код; LLM — только на языковых шагах, Structured Outputs, strict)
 
 | Шаг | Как | Кто |
 |---|---|---|
-| P1 Разбор | `.docx` → пункты с номером (`1.2.3`), уровнем, текстом, заголовком раздела, порядковым индексом; таблицы → строки; оглавление отбрасывается. `backend/app/prebuilt/lib_docx.py` (заготовка, раскрыта) + обёртка `app/parse/docx.py`. PDF/Excel — вне ядра (принять файл, честная ошибка «формат не поддержан в прототипе»). | код |
+| P1 Разбор | `.docx` → пункты с номером (`1.2.3`), уровнем, текстом, заголовком раздела, порядковым индексом; таблицы → строки; оглавление отбрасывается. Каждому пункту — контекст: `section_path` (цепочка заголовков/номеров родителей), `lead_in` (вводная фраза родительского пункта, например «БВА не имеет права:» или «Главный аудитор:») и `modality` (duty / right / prohibition / neutral — по lead_in и собственному тексту: «не вправе», «не имеет права», «запрещается», «не допускается» → prohibition; «имеет право», «вправе» → right; «осуществляет», «обеспечивает», «проводит», «формирует», «представляет», «обязан» → duty; иначе neutral). `backend/app/prebuilt/lib_docx.py` (заготовка, раскрыта) + обёртка `app/parse/docx.py`. PDF/Excel — вне ядра (принять файл, честная ошибка «формат не поддержан в прототипе»). | код |
 | P2 Подразделения | Из текста пунктов: кандидаты по словарю («департамент», «отдел», «управление», «служба», «блок», «сектор», «группа», ДЗО) + LLM-вызов `extract_units` на разделе «Структура» → список подразделений с пунктами-источниками для каждой версии. Сопоставление «до»↔«после» по нормализованному названию + LLM `match_units` для переименований/слияний → статусы: сохранено / преобразовано (переименовано, слито, разделено) / создано / упразднено. | код + LLM |
-| P3 Функции | Для каждого подразделения (и для документа в целом, если функции не привязаны к подразделению): LLM `extract_functions` — атомарные функции {текст, подразделение, пункт-источник, категория: задача/функция/право/обязанность/ответственность}. Сигнатура функции — `lib_normalize.signature` (заготовка). Кэш по хэшу документа. | LLM |
-| P4 Сопоставление до↔после | Сначала детерминированно: одинаковые пункты (нормализованный текст) → «сохранена»; затем по сигнатуре → кандидаты «изменена/перенесена»; остаток — LLM `match_functions` парами (до: список нераспределённых, после: список нераспределённых) → сохранена / изменена / утрачена / новая / перенесена (в другое подразделение). Каждой паре — оба пункта. | код + LLM |
-| P5 Дубли и конфликты | Дубли: одинаковая сигнатура или LLM-эквивалентность у функций **разных** подразделений одной версии. Конфликт интересов: правила (`app/rules/conflicts.py`): (а) подразделение и выполняет операцию, и контролирует/аудирует/оценивает её; (б) одно подразделение и инициирует, и согласует/утверждает; (в) внутренний аудит выполняет операционные функции; (г) функция контроля возложена на контролируемого. Для найденных пар — LLM `explain_conflict` формулирует, почему это конфликт, с цитатами. | код + LLM |
-| P6 Заключение | LLM `write_conclusion`: только из фактов P2–P5 (передаются как JSON), каждый абзац с номерами находок; рекомендации — по опциональному пункту 3 ТЗ. Экспорт в Markdown. | LLM |
+| P3 Функции | Для каждого подразделения (и для документа в целом, если функции не привязаны к подразделению): LLM `extract_functions` — атомарные функции {текст, подразделение, исполнитель (`executor`: подразделение или должность из заголовка/lead_in/текста), `modality`, пункт-источник, пункты контекста, категория: задача/функция/право/обязанность/ответственность}. Запреты (`modality = prohibition`) — не функции, а ограничения: в сопоставление потерь и дублей не идут, в отчёте показываются отдельным списком «Ограничения», учитываются в конфликтах. Сигнатура функции — `lib_normalize.signature` (заготовка) — только признак-кандидат, не решение (известная коллизия: «аудит ИТ» и «аудит закупок» дают одну сигнатуру). Кэш по хэшу документа. | LLM |
+| P4a Кандидаты | Для каждой функции «до» — гибридный поиск кандидатов среди функций «после»: (а) лексический — токенизация с сохранением кодов и аббревиатур (БВА, ДЗО, СВА) как токенов, BM25-подобная оценка на чистом Python/numpy, top-5; (б) равенство сигнатуры; (в) опционально dense — OpenAI embeddings `text-embedding-3-small` через `app/llm.py` при наличии ключа, векторы кэшируются в `backend/app/mocks/embeddings/{sha256(text)}.json`; в mock-режиме без кэша dense пропускается без ошибки; (г) слияние рангов RRF. Порог косинуса решением не является (0,85 давал 44 ложных дубля из 150). Точное совпадение нормализованного текста фиксируется как `verification = exact`. Кандидаты дублей — тем же поиском между функциями **разных** подразделений одной версии, шаблонные формулировки исключаются («иные функции», «поручения руководства», «согласно законодательству»). | код (+ embeddings) |
+| P4b Проверка | Решает LLM. `verify_matches`: одна функция «до» с контекстом + её кандидаты «после» (≤ 5, с пунктами и контекстом) → `{decision: kept|changed|moved|split|merge|partial|none, after_ids, rationale, quotes}` → статус и вид связи (один-ко-многим). Потеря — только после проверки по **всему** документу «после»: при `none` выполняется второй лексический поиск по всем функциям и по сырому тексту пунктов «после», и LLM `confirm_loss` подтверждает отсутствие с цитатой ближайшего похожего пункта; иначе функция остаётся «кандидат в потери, не проверено» (`verified = false`) и показывается отдельно с причиной (нет ответа проверки, лимит пакета, низкая уверенность). Дубли: LLM `verify_duplicates` подтверждает только «одно и то же действие над одним и тем же объектом у двух разных исполнителей», причём ни одна сторона не «участвует/содействует/является соисполнителем» и не просто ссылается на документ. | LLM |
+| P5 Конфликты интересов | Узкие правила разделения обязанностей (`app/rules/conflicts.py`). Сила контроля: strong = «утверждает», «подписывает», «контролирует», «проверяет/аудирует»; weak = только «согласовывает» — не находка. Обязательное совпадение объекта (то же наименование документа/объекта у контролирующей и исполняющей функции, оценка перекрытия объекта). Исключения: «направляет на согласование» (согласует другой); контрольное слово внутри названия документа; «участие в контроле», «содействие», «соисполнитель» на любой стороне; управленческий оборот «организация и контроль»; надзор за чужим исполнением (подрядчик, поставщик, документы других подразделений); собственное планирование и отчётность подразделения (годовой план аудита, отчёт о работе) — не операционная деятельность; «ссылается на документ ≠ производит документ». Правила: (а) одно подразделение исполняет и strong-контролирует один объект; (б) одно подразделение инициирует и утверждает; (в) подразделение внутреннего аудита выполняет операционную функцию вне мандата аудита (закупает, начисляет, ведёт учёт); (г) контроль возложен на контролируемого. Ограничения (P3) учитываются. Для каждой находки — LLM `explain_conflict`: объяснение, `severity`, `verified`, `verification_note`; источники обеих сторон. | код + LLM |
+| P6 Заключение | LLM `write_conclusion`: только из фактов P2–P5 (передаются как JSON), каждый абзац с номерами находок; непроверенные кандидаты помечаются «требует проверки»; рекомендации — по опциональному пункту 3 ТЗ. Экспорт в Markdown. | LLM |
 
-Правило честности: любое утверждение в отчёте имеет `sources: [{doc, version, clause, quote}]`; находки без источника не показываются. Числа не выдумываются.
+Правило честности: любое утверждение в отчёте имеет `sources: [{doc, version, clause, quote}]` и `verification: exact|lexical|llm`; находки без источника не показываются как выводы («источника нет» — честная метка). Числа не выдумываются.
+
+### 2а. Почему кандидаты и проверка разделены
+
+Сигнатура, лексический ранг и косинус эмбеддингов лишь сужают круг: они путают «аудит ИТ» с «аудитом закупок» и при пороге 0,85 дали 44 ложных дубля из 150. Поэтому любая похожесть — только кандидат, а статус (сохранена, изменена, утрачена, дубль, конфликт) ставит отдельный проверочный шаг с LLM по строгой схеме, с цитатами обеих сторон. Что не прошло проверку, показывается как «кандидат — требует проверки», а не как вывод.
 
 ## 3. Модель данных (`backend/app/schemas.py`, зеркало в `frontend/lib/types.ts`)
 
 ```
 Document(id, name, version: "before"|"after", kind: "polozhenie"|"di"|"order"|"other", clauses: [Clause])
-Clause(id, number: "3.2.1"|None, section: str, text: str, index: int)
+Clause(id, number: "3.2.1"|None, section: str, text: str, index: int,
+       section_path: [str], lead_in: str|None, modality: duty|right|prohibition|neutral)
 Source(doc_id, doc_name, version, clause_number, quote)
 Unit(id, name, version, parent: str|None, sources: [Source])
 UnitChange(unit_before: Unit|None, unit_after: Unit|None, status: kept|transformed|created|abolished, note: str, sources: [Source])
-Function(id, unit_id, text, category, signature, sources: [Source])
-FunctionMatch(before: Function|None, after: Function|None, status: kept|changed|lost|new|moved, confidence: 0..1, note: str)
-Duplicate(function_a: Function, function_b: Function, similarity: 0..1, note: str)
-Conflict(rule_id, title, units: [str], functions: [Function], explanation: str, sources: [Source])
-Report(run_id, created_at, documents, unit_changes, function_matches, duplicates, conflicts, conclusion_md, stats)
+Function(id, unit_id, text, category: task|function|right|duty|responsibility, signature, executor: str|None,
+         modality: duty|right|prohibition|neutral, context_clause_numbers: [str], sources: [Source])
+FunctionMatch(before: [Function], after: [Function], kind: one_to_one|split|merge|partial,
+              status: kept|changed|lost|new|moved, verified: bool, verification: exact|lexical|llm,
+              confidence: 0..1, note: str, sources: [Source])
+Duplicate(function_a: Function, function_b: Function, similarity: 0..1, verified: bool,
+          verification: exact|lexical|llm, verification_note: str, sources: [Source])
+Conflict(rule_id, role_pattern, title, units: [str], functions: [Function], explanation: str,
+         severity: low|medium|high, verified: bool, verification: exact|lexical|llm, verification_note: str, sources: [Source])
+Report(run_id, created_at, documents, unit_changes, function_matches, constraints: [Function],
+       duplicates, conflicts, conclusion_md, stats)
+Report.stats: {units_*, kept, changed, lost, new, moved, unverified_candidates, duplicates, conflicts}
 ```
+`unverified_candidates` — число находок с `verified = false` среди `function_matches`, `duplicates` и `conflicts`.
+Запреты (`modality = prohibition`) хранятся в `constraints`, в `function_matches` и `duplicates` не попадают. Находка с `verified = false` — «кандидат, требует проверки», в выводы заключения не идёт.
 
 ## 4. API (`/api`, JSON; ошибки `{error, detail}`)
 
@@ -45,31 +60,35 @@ Report(run_id, created_at, documents, unit_changes, function_matches, duplicates
 GET  /health                              → {status, llm_mode, version}
 POST /api/runs            multipart: before[]=.docx, after[]=.docx   → {run_id}
 POST /api/runs/demo                       → {run_id}   # тестовый комплект data/case11
-GET  /api/runs/{run_id}                   → {status: queued|parsing|units|functions|matching|conclusion|done|error, progress: 0..100, error?}
+GET  /api/runs/{run_id}                   → {status: queued|parsing|units|functions|candidates|verification|conflicts|conclusion|done|partial|error, progress: 0..100, error?}
 GET  /api/runs/{run_id}/report            → Report
 GET  /api/runs/{run_id}/clauses/{doc_id}/{clause_number} → Clause (для панели источника)
 GET  /api/runs/{run_id}/report.md         → text/markdown (скачать заключение)
 ```
 Анализ идёт в фоне (asyncio task), фронт опрашивает статус раз в 2 с. Хранилище — in-memory + JSON-дамп в `backend/data/runs/{run_id}.json`. Лимиты: ≤ 10 файлов, ≤ 10 МБ каждый, только .docx в ядре.
 
-**Mock-режим (`LLM_MODE=mock`, по умолчанию):** LLM-вызовы отдают фикстуры из `backend/app/mocks/{name}/{hash}.json`; для тестового комплекта фикстуры — реальные ответы модели, сохранённые сессией S11. Эксперт без ключа получает полный отчёт на тестовом комплекте; на своих документах в mock-режиме видит честное сообщение «нужен ключ OpenAI, добавьте в .env».
+**Mock-режим (`LLM_MODE=mock`, по умолчанию):** LLM-вызовы отдают фикстуры из `backend/app/mocks/{name}/{hash}.json`; для тестового комплекта фикстуры — реальные ответы модели, сохранённые сессией S15 (живой прогон с ключом). Эксперт без ключа получает полный отчёт на тестовом комплекте; на своих документах в mock-режиме видит честное сообщение «нужен ключ OpenAI, добавьте в .env».
 
 ## 5. LLM-вызовы (OpenAI Responses API, `text.format` json_schema strict; промпты в `backend/app/prompts/*.md`)
 
 | Имя | Вход | Выход |
 |---|---|---|
-| `extract_units` | пункты раздела о структуре (и весь документ, если раздела нет), версия | `{units:[{name, parent, clause_numbers:[..]}]}` |
-| `match_units` | списки подразделений до/после | `{pairs:[{before, after, status, note}]}` |
-| `extract_functions` | пункты одного подразделения (или раздела «функции») | `{functions:[{text, category, clause_number}]}` |
-| `match_functions` | нераспределённые функции до и после (≤ 60 за вызов) | `{matches:[{before_id, after_id, status, note}]}` |
-| `find_duplicates` | функции двух подразделений | `{pairs:[{a_id, b_id, similarity, note}]}` |
-| `explain_conflict` | правило + функции + пункты | `{explanation, severity: low|medium|high}` |
-| `write_conclusion` | JSON находок | `{conclusion_md, recommendations:[..]}` |
+| `extract_units` | пункты раздела о структуре (и весь документ, если раздела нет), версия | `{units:[{name, parent: str ("" — нет), clause_numbers:[..]}]}` |
+| `match_units` | списки подразделений до/после | `{pairs:[{before: str ("" — нет), after: str ("" — нет), status, note}]}` |
+| `extract_functions` | пункты одного подразделения (или раздела «функции») с `section_path`, `lead_in`, `modality` | `{functions:[{text, category: task|function|right|duty|responsibility, executor: str|null, modality, clause_number, context_clause_numbers:[..]}]}` |
+| `verify_matches` | одна функция «до» с контекстом + кандидаты «после» (≤ 5, с пунктами и контекстом) | `{decision: kept|changed|moved|split|merge|partial|none, after_ids:[..], rationale, quotes:[..]}` |
+| `confirm_loss` | функция «до» + результаты поиска по всем функциям и сырым пунктам «после» | `{lost: bool, nearest_clause_number: str|null, nearest_quote, rationale}` |
+| `verify_duplicates` | одна пара функций разных подразделений одной версии, с пунктами и контекстом (по одному вызову на пару) | `{is_duplicate: bool, same_action: bool, same_object: bool, both_executors: bool, verification_note}` |
+| `explain_conflict` | правило, role_pattern, функции обеих сторон + пункты | `{explanation, severity: low|medium|high, verified: bool, verification_note}` |
+| `write_conclusion` | JSON находок (с флагами `verified`) | `{conclusion_md, recommendations:[..]}` |
 
-Все схемы `additionalProperties: false`, все поля обязательные; `clause_number` только из переданного списка (проверяется кодом, иначе находка отбрасывается).
+Все схемы `additionalProperties: false`, все поля обязательные; `clause_number` (в том числе `after_ids`, `nearest_clause_number`, `context_clause_numbers`) только из переданного списка (проверяется кодом, иначе находка отбрасывается). Похожесть (сигнатура, BM25, косинус) статус не ставит — только эти вызовы.
+
+
+**Пустые значения.** В моделях домена (`schemas.py`, `types.ts`) отсутствующее значение — `null`/`None`. В JSON-схемах LLM-вызовов все поля обязательны (strict), поэтому там отсутствующее строковое значение — пустая строка `""`, которую код при конвертации в модели домена превращает в `None`.
 
 ## 6. Фронтенд (Next.js App Router, RU)
-Страницы: `/` (загрузка + тестовый комплект), `/runs/[id]` (прогресс), `/report/[id]` (вкладки + панель источника). Компоненты: `UploadBox`, `RunProgress`, `UnitsTable`, `FunctionMatrix`, `DuplicatesList`, `ConflictsList`, `ConclusionView`, `SourceDrawer`, `StatusBadge`. Все ошибки — понятным текстом.
+Страницы: `/` (загрузка + тестовый комплект), `/runs/[id]` (прогресс), `/report/[id]` (вкладки + панель источника). Компоненты: `UploadBox`, `RunProgress`, `UnitsTable`, `FunctionMatrix` (связи один-ко-многим, блоки «Ограничения» и «Кандидаты в потери — требует проверки»), `DuplicatesList`, `ConflictsList`, `ConclusionView`, `SourceDrawer`, `StatusBadge` (в том числе метки `verification` и «требует проверки»). Все ошибки — понятным текстом.
 
 ## 7. Границы
 Вне ядра: PDF/Excel-разбор, сравнение с НПА (опц. 1), бенчмарк с другими операторами (опц. 2), редактирование отчёта, авторизация, БД. Рекомендации (опц. 3) — только если P6 готов к 16:30.

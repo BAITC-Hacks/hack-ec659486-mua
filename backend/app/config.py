@@ -26,6 +26,8 @@ class Settings(BaseSettings):
 
     app_name: str = "ОргДифф API"
     app_version: str = "0.1.0"
+    data_dir: str = "../data"      # тестовый комплект data/case11 (в Docker: /app/data)
+    runtime_dir: str = "./runtime"  # JSON-дампы запусков (в Docker: том /app/runtime)
 
     openai_api_key: str | None = None
     openai_model: str = "gpt-5.6-luna"

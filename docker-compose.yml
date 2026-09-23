@@ -9,7 +9,12 @@ services:
     env_file:
       - path: .env
         required: false
+    volumes:
+      - ./data:/app/data:ro
+      - backend_runs:/app/runtime
     environment:
+      DATA_DIR: /app/data
+      RUNTIME_DIR: /app/runtime
       CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:3000}
       LLM_MODE: ${LLM_MODE:-mock}
       # Дефолт держать таким же, как в backend/app/config.py.
@@ -51,3 +56,6 @@ services:
       retries: 6
       start_period: 15s
     restart: unless-stopped
+
+volumes:
+  backend_runs:

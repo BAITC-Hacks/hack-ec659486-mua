@@ -63,14 +63,16 @@
 | `backend/app/prompts/extract_functions.md` | — | — | **S09** | — | — |
 | `backend/app/mocks/extract_functions/**` | — | — | **S09** | S15 (замена) | — |
 | `backend/tests/test_functions.py` | — | — | **S09** | — | — |
+| `backend/app/candidates.py` (гибридный поиск кандидатов; S11 только импортирует) | — | — | **S10** | — | — |
 | `backend/app/matching.py` | — | — | **S10** | — | — |
-| `backend/app/prompts/match_functions.md` | — | — | **S10** | — | — |
-| `backend/app/mocks/match_functions/**` | — | — | **S10** | S15 (замена) | — |
+| `backend/app/prompts/verify_matches.md`, `confirm_loss.md` | — | — | **S10** | — | — |
+| `backend/app/mocks/verify_matches/**`, `mocks/confirm_loss/**` | — | — | **S10** | S15 (замена) | — |
+| `backend/app/mocks/embeddings/**` (кэш векторов + README) | — | — | **S10** | S15 (+ векторы при ключе) | — |
 | `backend/tests/test_matching.py` | — | — | **S10** | — | — |
 | `backend/app/duplicates.py` | — | — | **S11** | — | — |
 | `backend/app/rules/__init__.py`, `rules/conflicts.py` | — | — | **S11** | — | — |
-| `backend/app/prompts/find_duplicates.md`, `explain_conflict.md` | — | — | **S11** | — | — |
-| `backend/app/mocks/find_duplicates/**`, `mocks/explain_conflict/**` | — | — | **S11** | S15 (замена) | — |
+| `backend/app/prompts/verify_duplicates.md`, `explain_conflict.md` | — | — | **S11** | — | — |
+| `backend/app/mocks/verify_duplicates/**`, `mocks/explain_conflict/**` | — | — | **S11** | S15 (замена) | — |
 | `backend/tests/test_conflicts.py` | — | — | **S11** | — | — |
 | `backend/app/llm_schemas.py` | — | — | **S13** | — | — |
 | `backend/tests/test_llm_schemas.py` | — | — | **S13** | — | — |
@@ -93,7 +95,8 @@
 
 ### Проверка пересечений (23.09 14:10)
 
-Внутри каждой волны две сессии не пишут в один файл — проверено по строкам «Пишешь только в» S01–S17 и S18–S20.
+Внутри каждой волны две сессии не пишут в один файл — проверено по строкам «Пишешь только в» S01–S17 и S18–S20
+(перепроверено 14:25 после переименования вызовов, см. ниже).
 
 Найдено и исправлено:
 - **S01**: `backend/app/store.py` создавался по п. 3 задания, но не был указан в «Пишешь только в» — добавлен туда
@@ -110,6 +113,22 @@
   `conclusion`/`export_md` в пайплайн — через ленивый `getattr` в `pipeline.py` (S08), правки не нужны.
 - **В3, `frontend/app/report/[id]/page.tsx`** и `lib/api-runs.ts`: единственный владелец S12; S06/S07 (владельцы волны 2)
   к этому моменту влиты.
+
+### Проверка пересечений (23.09 14:25, после решений аудита)
+
+Переименованы LLM-вызовы и файлы под них: `match_functions` → `verify_matches` + `confirm_loss` (S10),
+`find_duplicates` → `verify_duplicates` (S11); строки матрицы обновлены, промпты S10/S11 и spec §5 совпадают по именам.
+
+- **В3, `backend/app/candidates.py`**: новый модуль, единственный владелец S10 (вместе с `mocks/embeddings/**`).
+  S11 в той же волне его **импортирует лениво** и не пишет; чтобы тест S11 был зелёным до мержа S10,
+  `find_duplicates(...)` принимает готовые `candidate_pairs` (их считает S08 на шаге `candidates`), а при `ImportError`
+  использует запасной генератор по сигнатуре внутри `duplicates.py`. Копировать `candidates.py` в `s/conflicts` нельзя.
+- **В3, `backend/app/llm_schemas.py`** (S13) пишется параллельно с S09/S10/S11: те держат собственные pydantic-модели
+  с теми же именами и полями (`ExtractFunctionsOut`, `VerifyMatchesOut`, `ConfirmLossOut`, `VerifyDuplicatesOut`,
+  `ExplainConflictOut`) и переходят на импорт из `llm_schemas.py` только если он уже в ветке. Дублирование моделей —
+  осознанное, снимает его интегратор после волны 3.
+- Соглашение о пустых значениях: `extract_units.parent`, `match_units.before/after` — `""` (S05, S13);
+  `extract_functions.executor`, `confirm_loss.nearest_clause_number` — `null` (S09, S10, S13).
 
 ## Волны, коротко (полный лист — `prompts/sessions/README.md`)
 

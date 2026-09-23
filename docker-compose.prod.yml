@@ -23,7 +23,12 @@ services:
     env_file:
       - path: .env
         required: false
+    volumes:
+      - ./data:/app/data:ro
+      - backend_runs:/app/runtime
     environment:
+      DATA_DIR: /app/data
+      RUNTIME_DIR: /app/runtime
       CORS_ORIGINS: https://${DOMAIN}
       LLM_MODE: ${LLM_MODE:-live}
       OPENAI_MODEL: ${OPENAI_MODEL:-gpt-5-mini}
@@ -56,3 +61,4 @@ services:
 volumes:
   caddy_data:
   caddy_config:
+  backend_runs:
