@@ -20,6 +20,7 @@ from app.config import Settings
 from app.llm import LLM, LLMError
 from app.schemas import Clause, Document, Source, Unit, UnitChange
 from app.units import (
+    UnitsResult,
     detect_units,
     extract_units,
     find_candidates,
@@ -407,9 +408,8 @@ def test_match_units_pairs_are_validated() -> None:
     assert by_status["created"].unit_after.id == "a1"
 
 
-def test_case11_kit(kit: tuple[Document, Document]) -> None:
-    before, after = kit
-    result = detect_units(before, after, mock_llm())
+def check_kit_result(result: UnitsResult, before: Document, after: Document) -> None:
+    """Ожидаемое на тестовом комплекте (ред. 8 → ред. 9, эталон data/case11/diff-8-vs-9.md)."""
     assert result, "подразделения не найдены"
     for change in result:
         assert change.sources, f"{change.id} без источников"
@@ -457,6 +457,19 @@ def test_case11_kit(kit: tuple[Document, Document]) -> None:
 
     # результат годится как Report.unit_changes (контракт S08)
     TypeAdapter(list[UnitChange]).validate_python(result)
+
+
+def test_case11_kit(kit: tuple[Document, Document]) -> None:
+    before, after = kit
+    check_kit_result(detect_units(before, after, mock_llm()), before, after)
+
+
+def test_case11_kit_with_s04_parser() -> None:
+    """Тот же сценарий на разборе S04: фикстуры лежат и под его хэши входа (демо в mock-режиме)."""
+    parse = pytest.importorskip("app.parse.docx", reason="парсер S04 ещё не влит в ветку")
+    before = parse.parse_docx(DATA_DIR / DOC_BEFORE, "before")
+    after = parse.parse_docx(DATA_DIR / DOC_AFTER, "after")
+    check_kit_result(detect_units(before, after, mock_llm()), before, after)
 
 
 def test_missing_fixture_raises_llm_error() -> None:
