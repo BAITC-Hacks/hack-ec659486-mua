@@ -50,3 +50,6 @@ setup/install.log
 data/case11/*.txt
 backend/data/runs/
 backend/runtime/
+
+# рабочие копии сессий Claude Code
+.claude/
