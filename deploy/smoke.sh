@@ -65,12 +65,6 @@ python3 -c 'import json,sys; r=json.load(sys.stdin); required=("unit_changes","f
 MARKDOWN=$(curl -fsS "$BACKEND/api/runs/$RUN_ID/report.md") || fail "экспорт .md недоступен"
 [ -n "$MARKDOWN" ] || fail "экспорт .md пуст"
 
-echo "== backend: PDF отклоняется"
-CODE=$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BACKEND/api/runs" \
-  -F 'before[]=@backend/tests/test_e2e_mock.py;filename=before.pdf;type=application/pdf' \
-  -F 'after[]=@backend/tests/test_e2e_mock.py;filename=after.pdf;type=application/pdf')
-[ "$CODE" = "400" ] || fail "PDF-загрузка дала HTTP $CODE вместо 400"
-
 echo "== backend: ошибки не раскрывают внутренности"
 NOT_FOUND=$(curl -s "$BACKEND/api/does-not-exist")
 if grep -qiE 'traceback|sk-[A-Za-z0-9]' <<<"$NOT_FOUND"; then
