@@ -4,6 +4,7 @@
 {error, detail} с русским текстом (форматирует app.main).
 """
 
+import asyncio
 import re
 from datetime import UTC, datetime
 from pathlib import Path
@@ -16,6 +17,7 @@ from fastapi.responses import PlainTextResponse
 from app import pipeline, store
 from app.config import BACKEND_DIR, get_settings
 from app.schemas import Clause, Report, RunCreated, RunStatus, empty_stats
+from app.validation import UploadError, validate_docx_content, with_timeout
 
 router = APIRouter(prefix="/api/runs", tags=["runs"])
 
@@ -28,6 +30,7 @@ DEMO_AFTER = "Положение_о_внутреннем_аудите_редак
 
 READY_STATES = ("done", "partial")
 _UNSAFE_NAME = re.compile(r"[^\w.\- ]+")
+_TASKS: set[asyncio.Task[None]] = set()
 
 
 def api_error(status_code: int, error: str, detail: str) -> HTTPException:
@@ -63,7 +66,11 @@ def _create_run(run_id: str, inputs: dict[str, list[dict[str, str]]], detail: st
         stats=empty_stats(),
     )
     store.put(run_id, store.RunRecord(status=status, report=report, inputs=inputs))
-    pipeline.start(run_id)
+    task = asyncio.create_task(
+        with_timeout(run_id, pipeline.run_pipeline(run_id), store), name=f"run-{run_id}"
+    )
+    _TASKS.add(task)
+    task.add_done_callback(_TASKS.discard)
     return RunCreated(run_id=run_id)
 
 
@@ -147,8 +154,11 @@ async def create_run(
             for number, (name, content) in enumerate(items, start=1):
                 path = folder / f"{number:02d}_{_safe_name(name)}"
                 path.write_bytes(content)
+                validate_docx_content(path, version)
                 display = Path(name.replace("\\", "/")).name or path.name
                 inputs[version].append({"path": str(path), "name": display})
+    except UploadError as exc:
+        raise api_error(422, "validation", f"{exc.field}: {exc.reason}") from exc
     except OSError as exc:
         raise api_error(
             500, "storage_error", f"Не удалось сохранить загруженные файлы: {exc.strerror}."
@@ -168,6 +178,11 @@ async def create_demo_run() -> RunCreated:
             "demo_missing",
             "Тестовый комплект не найден: " + ", ".join(missing) + f" (каталог {data_dir}).",
         )
+    try:
+        validate_docx_content(data_dir / DEMO_BEFORE, "before")
+        validate_docx_content(data_dir / DEMO_AFTER, "after")
+    except UploadError as exc:
+        raise api_error(422, "validation", f"{exc.field}: {exc.reason}") from exc
     inputs = {
         "before": [{"path": str(data_dir / DEMO_BEFORE), "name": DEMO_BEFORE}],
         "after": [{"path": str(data_dir / DEMO_AFTER), "name": DEMO_AFTER}],
