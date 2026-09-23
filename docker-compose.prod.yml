@@ -1,0 +1,58 @@
+# Production на VPS (2 CPU / 2 GB): Caddy (HTTPS от Let's Encrypt автоматически) -> frontend / backend.
+# Запуск на сервере:  cp .env.example .env && nano .env (DOMAIN, OPENAI_API_KEY, LLM_MODE=live)
+#                     docker compose -f docker-compose.prod.yml up -d --build
+# С ноутбука:         deploy/deploy.sh root@IP   (первый раз — deploy/vps-bootstrap.sh на сервере)
+# Порты наружу открывает только caddy; backend и frontend доступны лишь внутри docker-сети.
+
+services:
+  caddy:
+    image: caddy:2
+    restart: unless-stopped
+    ports: ["80:80", "443:443"]
+    environment:
+      DOMAIN: ${DOMAIN:?set DOMAIN in .env}
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on: [backend, frontend]
+
+  backend:
+    build:
+      context: ./backend
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      CORS_ORIGINS: https://${DOMAIN}
+      LLM_MODE: ${LLM_MODE:-live}
+      OPENAI_MODEL: ${OPENAI_MODEL:-gpt-5-mini}
+    expose: ["8000"]
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=3)"]
+      interval: 15s
+      timeout: 5s
+      retries: 6
+      start_period: 10s
+    restart: unless-stopped
+
+  frontend:
+    build:
+      context: ./frontend
+      args:
+        # Один origin: браузер ходит в API через Caddy по /api и /health.
+        NEXT_PUBLIC_API_URL: https://${DOMAIN}
+        NEXT_PUBLIC_APP_NAME: ${NEXT_PUBLIC_APP_NAME:-ОргДифф}
+    environment:
+      API_URL_INTERNAL: http://backend:8000
+      NEXT_PUBLIC_API_URL: https://${DOMAIN}
+      NEXT_PUBLIC_APP_NAME: ${NEXT_PUBLIC_APP_NAME:-ОргДифф}
+    expose: ["3000"]
+    depends_on:
+      backend:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  caddy_data:
+  caddy_config:

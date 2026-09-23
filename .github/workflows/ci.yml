@@ -1,0 +1,72 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  backend:
+    name: Backend (ruff + pytest)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    env:
+      LLM_MODE: mock
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+          cache-dependency-glob: |
+            backend/pyproject.toml
+            backend/uv.lock
+
+      # uv сам скачает Python 3.12 из backend/.python-version.
+      # Пока нет uv.lock используем `uv sync`; когда lock закоммичен, можно `uv sync --frozen`.
+      - name: Install dependencies
+        run: uv sync
+
+      - name: Lint (ruff)
+        run: uv run ruff check .
+
+      - name: Test (pytest, mock mode)
+        run: uv run pytest -q
+
+  frontend:
+    name: Frontend (eslint + build + tsc)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    env:
+      NEXT_TELEMETRY_DISABLED: "1"
+      NEXT_PUBLIC_API_URL: http://localhost:8000
+      NEXT_PUBLIC_APP_NAME: ОргДифф
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      # Пока нет package-lock.json ставим через `npm install`; с lock-файлом -> `npm ci`.
+      - name: Install dependencies
+        run: |
+          if [ -f package-lock.json ]; then npm ci; else npm install; fi
+
+      - name: Lint (eslint)
+        run: npm run lint
+
+      - name: Build (next build)
+        run: npm run build
+
+      - name: Typecheck (tsc --noEmit)
+        run: npm run typecheck

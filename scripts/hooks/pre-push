@@ -1,0 +1,7 @@
+#!/bin/sh
+# Blocks non-fast-forward (force) pushes for humans and agents alike.
+while read local_ref local_sha remote_ref remote_sha; do
+  case "$remote_sha" in 0000000000000000000000000000000000000000) continue;; esac
+  git merge-base --is-ancestor "$remote_sha" "$local_sha" || { echo "pre-push: non-fast-forward push blocked (no force-push at the hackathon)" >&2; exit 1; }
+done
+exit 0

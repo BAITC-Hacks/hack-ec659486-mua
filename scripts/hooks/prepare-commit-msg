@@ -1,0 +1,10 @@
+#!/bin/sh
+# Дописывает трейлер соавтора, если этот worktree принадлежит сессии.
+# Агенты запускаются в интерфейсе, переменной окружения при запуске нет,
+# поэтому имя инструмента лежит в файле .session в корне worktree (он в .gitignore).
+# Файл создаёт scripts/ops/new-session.sh.
+root=$(git rev-parse --show-toplevel 2>/dev/null) || exit 0
+[ -f "$root/.session" ] || exit 0
+tool=$(sed -n 's/^tool=//p' "$root/.session" | head -1)
+[ "$tool" = "codex" ] || exit 0
+grep -q '^Co-authored-by: Codex' "$1" || printf '\nCo-authored-by: Codex <noreply@openai.com>\n' >> "$1"
