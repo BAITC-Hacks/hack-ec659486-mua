@@ -17,7 +17,7 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from app.config import get_settings
 from app.llm import LLMError, redact_secrets
-from app.routers import example
+from app.routers import example, runs
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
 logger = logging.getLogger("app")
@@ -43,7 +43,11 @@ def create_app() -> FastAPI:
     app = FastAPI(
         title=settings.app_name,
         version=settings.app_version,
-        description="Каркас хакатона: FastAPI + OpenAI Responses API с mock-режимом.",
+        description=(
+            "ОргДифф: сравнение оргструктуры и функционала по документам «до» и «после» "
+            "реорганизации. Контракт — app/schemas.py (зеркало frontend/lib/types.ts); "
+            "ошибки — {error, detail}."
+        ),
         lifespan=lifespan,
     )
 
@@ -56,7 +60,9 @@ def create_app() -> FastAPI:
     )
 
     # Роутеры фич: по одному модулю в app/routers/, подключать здесь.
+    # После волны 1 (S01) файл закрыт: новые роутеры не добавляются, логика — в своих модулях.
     app.include_router(example.router)
+    app.include_router(runs.router)
 
     @app.get("/health", tags=["system"])
     def health() -> dict[str, str]:
@@ -79,9 +85,16 @@ def create_app() -> FastAPI:
 
     @app.exception_handler(StarletteHTTPException)
     async def http_exception_handler(_: Request, exc: StarletteHTTPException) -> JSONResponse:
+        # Роутер может задать свой код ошибки и русский текст: detail={"error": ..., "detail": ...}
+        # (см. app.routers.runs.api_error). Иначе — общий код http_error.
+        detail = exc.detail
+        if isinstance(detail, dict) and "error" in detail and "detail" in detail:
+            content = {"error": str(detail["error"]), "detail": detail["detail"]}
+        else:
+            content = {"error": "http_error", "detail": detail}
         return JSONResponse(
             status_code=exc.status_code,
-            content={"error": "http_error", "detail": exc.detail},
+            content=content,
             headers=getattr(exc, "headers", None),
         )
 
