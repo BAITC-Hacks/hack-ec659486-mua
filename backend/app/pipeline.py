@@ -11,13 +11,15 @@ conflicts → conclusion → done | partial | error.
 не пишется.
 
 Дубли и конфликты ищутся в версии «после»: это структура, которую оценивает аналитик.
-В отчёт попадают только находки с источниками, найденными в разобранных документах.
+В отчёт попадают только находки, чьи источники подтверждены разобранными документами: пункт
+(clause_id и номер) и дословная цитата — у самой находки и у обеих её сторон.
 """
 
 import asyncio
 import importlib
 import logging
 import re
+import unicodedata
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
@@ -243,9 +245,8 @@ async def _parsing(run: _Run, inputs: dict[str, list[dict[str, str]]]) -> None:
 
 async def _units(run: _Run) -> None:
     detect_units = _function(_module("units"), "detect_units")
-    changes = await asyncio.to_thread(
-        detect_units, _side(run.docs["before"]), _side(run.docs["after"])
-    )
+    # Версия — список документов (положение, ДИ, приказ); S05 объединяет подразделения всех.
+    changes = await asyncio.to_thread(detect_units, run.docs["before"], run.docs["after"], run.llm)
     run.unit_changes = _sourced(_coerce(UnitChange, changes, "подразделение"), run, "подразделение")
 
 
@@ -263,12 +264,12 @@ async def _functions(run: _Run) -> None:
             else:
                 result = await asyncio.to_thread(extract_functions, doc, None, run.llm)
             functions, constraints = _split_result(result)
-            for fn in _sourced(_coerce(Function, functions, "функция"), run, "функция"):
+            for fn in _sourced(_coerce(Function, functions, "функция"), run, "функция", version):
                 # Запрет — ограничение, а не функция: в кандидаты и проверку не идёт.
                 target = run.constraints if fn.modality == "prohibition" else run.functions
                 target[version].append(fn)
             run.constraints[version].extend(
-                _sourced(_coerce(Function, constraints, "ограничение"), run, "ограничение")
+                _sourced(_coerce(Function, constraints, "ограничение"), run, "ограничение", version)
             )
 
 
@@ -412,11 +413,6 @@ def _field(result: Any, name: str) -> Any:
     return result.get(name) if isinstance(result, dict) else getattr(result, name, None)
 
 
-def _side(docs: list[Document]) -> Document | list[Document]:
-    """Один документ версии передаётся как Document, несколько — списком."""
-    return docs[0] if len(docs) == 1 else docs
-
-
 def _units_by_version(changes: list[UnitChange]) -> dict[str, list[Any]]:
     units: dict[str, dict[str, Any]] = {"before": {}, "after": {}}
     for change in changes:
@@ -437,50 +433,137 @@ def _by_unit(functions: list[Function]) -> dict[str, list[Function]]:
 # --- проверка источников ----------------------------------------------------------------------
 
 
+_QUOTE_MARKS = str.maketrans(dict.fromkeys("«»“”„‟″", '"') | dict.fromkeys("‘’‚‛′", "'"))
+_DASHES = re.compile(r"[‐‑‒–—―−]")
+_SPACES = re.compile(r"\s+")
+_ELLIPSIS = re.compile(r"\.{3,}")
+_EDGE = " .,;:\"'"
+
+
+def _normalized(text: str) -> str:
+    """Для сверки цитаты: NFKC (неразрывные пробелы, «…»), кавычки, тире, пробелы, регистр."""
+    text = unicodedata.normalize("NFKC", text).translate(_QUOTE_MARKS)
+    return _SPACES.sub(" ", _DASHES.sub("-", text)).strip().casefold()
+
+
+def _quoted(quote: str, text: str) -> bool:
+    """Цитата дословно есть в тексте; «...» в цитате — пропуск, части идут в тексте по порядку.
+
+    Кавычки вокруг цитаты и знаки препинания на краях частей не учитываются.
+    """
+    needle, haystack = _normalized(quote), _normalized(text)
+    if needle and needle in haystack:
+        return True
+    parts = [part.strip(_EDGE) for part in _ELLIPSIS.split(needle)]
+    parts = [part for part in parts if part]
+    if not parts:
+        return False
+    position = 0
+    for part in parts:
+        found = haystack.find(part, position)
+        if found < 0:
+            return False
+        position = found + len(part)
+    return True
+
+
 def _source_ok(source: Source, run: _Run) -> bool:
-    """Источник существует: документ есть в прогоне той же версии, номер (или id) пункта — в нём."""
+    """Источник подтверждён документом прогона: документ той же версии, пункт с этим clause_id
+    и тем же печатным номером, цитата дословно из текста пункта (или его вводной фразы)."""
     for doc in run.docs.get(source.version, []):
         if doc.id != source.doc_id:
             continue
-        if source.clause_number is not None:
-            return any(clause.number == source.clause_number for clause in doc.clauses)
-        return any(clause.id == source.clause_id for clause in doc.clauses)
+        for clause in doc.clauses:
+            if clause.id != source.clause_id or clause.number != source.clause_number:
+                continue
+            text = f"{clause.lead_in} {clause.text}" if clause.lead_in else clause.text
+            if _quoted(source.quote, text):
+                return True
     return False
 
 
-def _sourced[M: BaseModel](items: list[M], run: _Run, what: str) -> list[M]:
-    """Оставляет у находок только проверяемые источники; находка без них отбрасывается."""
+def _with_sources[M: BaseModel](item: M, run: _Run, version: str | None = None) -> M | None:
+    """Только подтверждённые источники (и только версии version, если она задана); None — если
+    не осталось ни одного."""
+    sources: list[Source] = getattr(item, "sources")
+    valid = [
+        src
+        for src in sources
+        if (version is None or src.version == version) and _source_ok(src, run)
+    ]
+    if not valid:
+        return None
+    if len(valid) != len(sources):
+        logger.warning(
+            "%s %s: отброшено неподтверждённых источников: %d",
+            type(item).__name__,
+            getattr(item, "id", ""),
+            len(sources) - len(valid),
+        )
+        return item.model_copy(update={"sources": valid})
+    return item
+
+
+def _checked[M: BaseModel](item: M, run: _Run, version: str | None = None) -> M | None:
+    """Находка с подтверждёнными источниками или None, если подтвердить её нечем.
+
+    Проверяются источники самой находки и обеих её сторон: подразделения «до»/«после»,
+    функции сопоставления, пара функций дубля, функции конфликта. Сторона «до» подтверждается
+    только документами «до», сторона «после» — только «после». Сторона без подтверждённого
+    источника делает находку неподтверждённой: её не показывают.
+    """
+    update: dict[str, Any] = {}
+    if isinstance(item, UnitChange):
+        for side, side_version in (("unit_before", "before"), ("unit_after", "after")):
+            unit = getattr(item, side)
+            if unit is not None:
+                if (checked := _with_sources(unit, run, side_version)) is None:
+                    return None
+                update[side] = checked
+    elif isinstance(item, FunctionMatch):
+        for side in ("before", "after"):
+            functions = [_with_sources(fn, run, side) for fn in getattr(item, side)]
+            if any(fn is None for fn in functions):
+                return None
+            update[side] = functions
+    elif isinstance(item, Duplicate):
+        for side in ("function_a", "function_b"):
+            if (checked := _with_sources(getattr(item, side), run)) is None:
+                return None
+            update[side] = checked
+    elif isinstance(item, Conflict):
+        functions = [_with_sources(fn, run) for fn in item.functions]
+        if any(fn is None for fn in functions):
+            return None
+        update["functions"] = functions
+    if "sources" in type(item).model_fields:
+        if (own := _with_sources(item, run, version)) is None:
+            return None
+        update["sources"] = getattr(own, "sources")
+    return item.model_copy(update=update)
+
+
+def _sourced[M: BaseModel](
+    items: list[M], run: _Run, what: str, version: str | None = None
+) -> list[M]:
+    """Оставляет у находок только подтверждённые источники; находка, которую подтвердить
+    нечем (у самой находки или у любой из её сторон), отбрасывается."""
     kept: list[M] = []
     for item in items:
-        if isinstance(item, Duplicate):
-            sides = (item.function_a.sources, item.function_b.sources)
-            if all(any(_source_ok(src, run) for src in side) for side in sides):
-                kept.append(item)
-            else:
-                logger.warning("Отброшен дубль %s: нет источника в документах", item.id)
-            continue
-        sources: list[Source] = getattr(item, "sources", [])
-        valid = [src for src in sources if _source_ok(src, run)]
-        if not valid:
+        checked = _checked(item, run, version)
+        if checked is None:
             logger.warning(
-                "Отброшена находка «%s» %s: источника нет в документах",
+                "Отброшена находка «%s» %s: источник не подтверждён документом "
+                "(документ, clause_id, номер пункта или цитата)",
                 what,
                 getattr(item, "id", ""),
             )
             continue
-        if len(valid) != len(sources):
-            logger.warning(
-                "Находка «%s» %s: отброшено источников вне документов: %d",
-                what,
-                getattr(item, "id", ""),
-                len(sources) - len(valid),
-            )
-            item = item.model_copy(update={"sources": valid})
-        if isinstance(item, FunctionMatch):
-            item = _without_prohibitions(item)
-            if item is None:
+        if isinstance(checked, FunctionMatch):
+            checked = _without_prohibitions(checked)
+            if checked is None:
                 continue
-        kept.append(item)
+        kept.append(checked)
     return kept
 
 

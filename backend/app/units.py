@@ -715,20 +715,81 @@ class UnitsResult(list[UnitChange]):
 
 
 def detect_units(
-    doc_before: Document, doc_after: Document, llm: LLM | None = None, *, use_llm_match: bool = True
+    doc_before: Document | list[Document],
+    doc_after: Document | list[Document],
+    llm: LLM | None = None,
+    *,
+    use_llm_match: bool = True,
 ) -> UnitsResult:
-    """Какие подразделения сохранены / преобразованы / созданы / упразднены — с источниками."""
+    """Какие подразделения сохранены / преобразованы / созданы / упразднены — с источниками.
+
+    Версия — один документ или список (положение, ДИ, приказ): подразделения извлекаются из
+    каждого документа и объединяются по названию или аббревиатуре, источники — из всех.
+    """
     llm = llm or LLM()
-    cand_before = find_candidates(doc_before)
-    cand_after = find_candidates(doc_after)
-    units_before = extract_units(doc_before, llm, cand_before)
-    units_after = extract_units(doc_after, llm, cand_after)
+    units_before, positions_before = _version_units(_as_documents(doc_before), llm)
+    units_after, positions_after = _version_units(_as_documents(doc_after), llm)
     result = UnitsResult(match_units(units_before, units_after, llm, use_llm=use_llm_match))
     result.units_before = units_before
     result.units_after = units_after
-    result.positions_before = positions_of(doc_before, cand_before)
-    result.positions_after = positions_of(doc_after, cand_after)
+    result.positions_before = positions_before
+    result.positions_after = positions_after
     return result
+
+
+def _as_documents(docs: Document | list[Document]) -> list[Document]:
+    return [docs] if isinstance(docs, Document) else list(docs)
+
+
+def _version_units(docs: list[Document], llm: LLM) -> tuple[list[Unit], list[Position]]:
+    """Подразделения и должности одной версии по всем её документам, в порядке документов."""
+    units: list[Unit] = []
+    positions: list[Position] = []
+    for doc in docs:
+        candidates = find_candidates(doc)
+        units = _merge_units(units, extract_units(doc, llm, candidates))
+        positions.extend(positions_of(doc, candidates))
+    return units, positions
+
+
+def _merge_units(known: list[Unit], new: list[Unit]) -> list[Unit]:
+    """Добавляет подразделения очередного документа версии к найденным в предыдущих.
+
+    То же название или аббревиатура — одно подразделение: источники объединяются, ссылки
+    `parent` на него переводятся на уже известный id. Внутри одного документа дубли уже
+    схлопнуты `extract_units`, поэтому сравнение идёт только с `known`.
+    """
+    merged = list(known)
+    alias: dict[str, str] = {}  # id из нового документа → id того же подразделения из прежних
+    adopted: dict[int, str] = {}  # индекс в merged → parent, известный только новому документу
+    for unit in new:
+        key, abbr = normalize_name(unit.name), abbreviation_of(unit.name)
+        twin = next(
+            (
+                i
+                for i, other in enumerate(known)
+                if _same_unit(normalize_name(other.name), abbreviation_of(other.name), key, abbr)
+            ),
+            None,
+        )
+        if twin is None:
+            merged.append(unit)
+            continue
+        alias[unit.id] = merged[twin].id
+        if merged[twin].parent is None and unit.parent:
+            adopted[twin] = unit.parent
+        merged[twin] = merged[twin].model_copy(
+            update={"sources": _merge_sources(merged[twin].sources, unit.sources)}
+        )
+    for i, parent in adopted.items():
+        parent = alias.get(parent, parent)
+        if parent != merged[i].id:
+            merged[i] = merged[i].model_copy(update={"parent": parent})
+    for i in range(len(known), len(merged)):
+        parent = merged[i].parent
+        if parent is not None and parent in alias:
+            merged[i] = merged[i].model_copy(update={"parent": alias[parent]})
+    return merged
 
 
 def _parse_docx(path: str, version: str) -> Document:

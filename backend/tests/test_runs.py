@@ -5,6 +5,7 @@
 шагов (pipeline.MODULES) — так тест не зависит от порядка мержа соседей.
 """
 
+import json
 import sys
 import time
 import types
@@ -164,8 +165,9 @@ def fake_modules(monkeypatch: pytest.MonkeyPatch, calls: dict, **overrides) -> N
     def unit(doc: Document, uid: str) -> Unit:
         return Unit(id=uid, name="БВА", version=doc.version, parent=None, sources=[src(doc, "1.1")])
 
-    def detect_units(doc_before, doc_after):
-        before, after = unit(doc_before, "u8"), unit(doc_after, "u9")
+    def detect_units(docs_before, docs_after, llm=None):
+        # Как у S05: списки документов каждой версии и LLM прогона.
+        before, after = unit(docs_before[0], "u8"), unit(docs_after[0], "u9")
         return [
             UnitChange(
                 id="uc1",
@@ -457,7 +459,7 @@ def test_broken_import_inside_module_is_error(
 def test_missing_mock_fixture_is_error_with_key_hint(
     client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    def detect_units(doc_before, doc_after):
+    def detect_units(docs_before, docs_after, llm=None):
         raise LLMError("no mock fixture (ожидался файл /srv/app/mocks/extract_units/0a1b2c.json)")
 
     fake_modules(monkeypatch, {}, units={"detect_units": detect_units})
@@ -545,3 +547,159 @@ def test_upload_with_bracket_fields_saves_files_and_runs(
     assert (saved / "before" / "01_до.docx").read_bytes() == b"PK\x03\x04 before"
     assert (saved / "after" / "01_после.docx").is_file()
     assert (saved.parent / f"{run_id}.json").is_file(), "дамп запуска в runtime_dir"
+
+
+# --- проверка источников: цитата, clause_id, обе стороны находки -------------------------
+
+
+def _match(mid: str, before: list[Function], after: list[Function], sources: list[Source]):
+    return FunctionMatch(
+        id=mid,
+        before=before,
+        after=after,
+        kind="one_to_one",
+        status="kept" if after else "lost",
+        verified=True,
+        verification="llm",
+        confidence=0.9,
+        note="",
+        sources=sources,
+    )
+
+
+def test_source_check_verifies_quote_clause_id_and_both_sides(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def verify_matches(before, after, candidates, llm, after_clauses=None):
+        f1, f2 = before[0], before[1]
+        g1, g2 = after[0], after[1]
+        real = f1.sources[0]  # d8, п. 2.4.1
+        fake_quote = real.model_copy(update={"quote": "БВА согласует все закупки компании."})
+        foreign_id = real.model_copy(update={"clause_id": f2.sources[0].clause_id})
+        # Типографика, неразрывный пробел, пропуск «…» и точка в конце — та же цитата.
+        loose = real.model_copy(update={"quote": "«БВА\u00a0проводит аудит … управления рисками»."})
+        g1_fake = g1.model_copy(
+            update={"sources": [g1.sources[0].model_copy(update={"quote": "Выдуманный текст."})]}
+        )
+        f2_cites_after = f2.model_copy(update={"sources": g2.sources})
+        return [
+            _match("m-fake-quote", [f1], [g1], [fake_quote]),
+            _match("m-foreign-clause-id", [f1], [g1], [foreign_id]),
+            _match("m-fake-after-side", [f1], [g1_fake], [*f1.sources, *g1.sources]),
+            _match("m-before-side-cites-after", [f2_cites_after], [g2], [*f2.sources, *g2.sources]),
+            _match("m-loose-quote", [f1], [g1], [loose, *g1.sources]),
+        ]
+
+    fake_modules(monkeypatch, {}, matching={"verify_matches": verify_matches})
+    run_id = run_demo(client)
+    status, _ = wait_final(client, run_id)
+    assert status.status == "done", status.detail
+    report = Report.model_validate(client.get(f"/api/runs/{run_id}/report").json())
+    assert_honest_report(report)
+    by_id = {m.id: m for m in report.function_matches}
+    # Существующий номер пункта не спасает выдуманную цитату, чужой clause_id и сторону
+    # без подтверждённого источника; такие находки не показываются.
+    assert set(by_id) == {"m-loose-quote", "unverified-f2"}
+    assert by_id["m-loose-quote"].verified and not by_id["unverified-f2"].verified
+
+
+def test_unit_change_side_without_confirmed_source_is_dropped(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def detect_units(docs_before, docs_after, llm=None):
+        b, a = docs_before[0], docs_after[0]
+        u8 = Unit(id="u8", name="БВА", version="before", parent=None, sources=[src(b, "1.1")])
+        u9 = Unit(id="u9", name="БВА", version="after", parent=None, sources=[src(a, "1.1")])
+        invented = src(a, "1.1").model_copy(update={"quote": "Отдел закупок подчиняется БВА."})
+        fake = Unit(
+            id="u-fake", name="Отдел закупок", version="after", parent=None, sources=[invented]
+        )
+        return [
+            UnitChange(
+                id="uc1",
+                unit_before=u8,
+                unit_after=u9,
+                status="kept",
+                note="",
+                sources=[*u8.sources, *u9.sources],
+            ),
+            # У самой находки источник настоящий, у подразделения «после» — выдуманная цитата.
+            UnitChange(
+                id="uc-fake",
+                unit_before=None,
+                unit_after=fake,
+                status="created",
+                note="",
+                sources=[src(a, "1.1")],
+            ),
+        ]
+
+    fake_modules(monkeypatch, {}, units={"detect_units": detect_units})
+    run_id = run_demo(client)
+    status, _ = wait_final(client, run_id)
+    assert status.status == "done", status.detail
+    report = Report.model_validate(client.get(f"/api/runs/{run_id}/report").json())
+    assert [c.id for c in report.unit_changes] == ["uc1"]
+
+
+# --- несколько документов в версии: интерфейс S05/S08 -------------------------------------
+
+
+class StubLLM:
+    """«Живая» LLM без сети: ответ extract_units по пунктам, которые пришли в запросе."""
+
+    mode = "live"
+
+    def __init__(self) -> None:
+        self.calls: list[str] = []
+
+    def complete_json(self, name: str, system: str, user: str, schema: dict) -> dict:
+        self.calls.append(name)
+        assert name == "extract_units", f"неожиданный вызов LLM: {name}"
+        numbers = [c["number"] for c in json.loads(user)["clauses"]]
+        assert "1.1" in numbers
+        unit = {"name": "Блок внутреннего аудита (БВА)", "parent": "", "clause_numbers": ["1.1"]}
+        return {"units": [unit]}
+
+
+def test_several_documents_per_version_reach_units_step(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def parse_docx(path, version, name=None):
+        return make_doc(f"d-{Path(name).stem}", name, version)
+
+    llm = StubLLM()
+    fake_modules(
+        monkeypatch,
+        {},
+        parse={"parse_docx": parse_docx},
+        **dict.fromkeys(
+            ("functions", "candidates", "matching", "duplicates", "conflicts", "conclusion"),
+            None,
+        ),
+    )
+    monkeypatch.setitem(pipeline.MODULES, "units", "app.units")  # настоящий S05
+    monkeypatch.setattr(pipeline, "LLM", lambda settings=None: llm)
+    response = client.post(
+        "/api/runs",
+        files=[
+            ("before[]", ("положение.docx", b"PK\x03\x04 a", DOCX_MIME)),
+            ("before[]", ("ди.docx", b"PK\x03\x04 b", DOCX_MIME)),
+            ("after[]", ("положение-9.docx", b"PK\x03\x04 c", DOCX_MIME)),
+        ],
+    )
+    assert response.status_code == 201, response.text
+    run_id = response.json()["run_id"]
+    status, _ = wait_final(client, run_id)
+    assert status.status == "partial", status.detail
+    assert "units" not in status.missing_steps, status.detail
+    assert "has no attribute" not in (status.detail or "")
+    assert llm.calls == ["extract_units"] * 3  # по вызову на документ, match_units не нужен
+
+    report = Report.model_validate(client.get(f"/api/runs/{run_id}/report").json())
+    assert [d.id for d in report.before_documents] == ["d-положение", "d-ди"]
+    [change] = report.unit_changes
+    assert change.status == "kept"
+    # Одно подразделение «до» из двух документов — с источниками обоих.
+    assert {s.doc_id for s in change.unit_before.sources} == {"d-положение", "d-ди"}
+    assert {s.doc_id for s in change.unit_after.sources} == {"d-положение-9"}
