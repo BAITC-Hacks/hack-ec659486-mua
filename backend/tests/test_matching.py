@@ -59,6 +59,12 @@ L9_56 = (
 )
 
 
+@pytest.fixture(autouse=True)
+def _empty_embeddings_cache(tmp_path, monkeypatch: pytest.MonkeyPatch) -> None:
+    # Тесты написаны под mock без векторов; живые векторы комплекта (S15) их не касаются.
+    monkeypatch.setattr(cand_mod, "EMBEDDINGS_DIR", tmp_path / "embeddings")
+
+
 def clause(
     doc: tuple[str, str, str],
     para: int,
