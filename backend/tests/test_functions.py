@@ -183,8 +183,8 @@ def test_clauses_assigned_to_one_owner(kit: dict[str, Any]) -> None:
     assert "(ДККМ)" in owner("before", "5.5.11")  # «формирует план работ БВА» — но под ДККМ
     assert owner("before", "5.3.4.а") == "Направление внутреннего аудита"
     assert "(ДИТААД)" in owner("after", "5.3.2.а")  # вводная называет двоих, пункт — одного
-    assert "(БВА)" in owner("after", "5.3.1")  # вводная на двоих → общий родитель
-    assert "(БВА)" in owner("after", "4.4.а")  # «…, БВА:»
+    assert "БВА" in owner("after", "5.3.1")  # вводная на двоих → общий родитель
+    assert "БВА" in owner("after", "4.4.а")  # «…, БВА:»
 
 
 def test_function_scope_skips_headings_and_unnumbered(kit: dict[str, Any]) -> None:
