@@ -61,6 +61,9 @@ python3 -c 'import json,sys; r=json.load(sys.stdin); required=("unit_changes","f
   <<<"$REPORT" || fail "в отчёте нет подразделений, функций или дублей"
 MARKDOWN=$(curl -fsS "$BACKEND/api/runs/$RUN_ID/report.md") || fail "экспорт .md недоступен"
 [ -n "$MARKDOWN" ] || fail "экспорт .md пуст"
+FRONTEND_MARKDOWN=$(curl -fsS "$FRONTEND/api/runs/$RUN_ID/report.md") || \
+  fail "экспорт .md через frontend недоступен"
+[ "$FRONTEND_MARKDOWN" = "$MARKDOWN" ] || fail "экспорт frontend отличается от backend"
 
 echo "== backend: PDF отклоняется как неподдерживаемый формат"
 PDF_RESPONSE=$(curl -sS -w '\n%{http_code}' -X POST "$BACKEND/api/runs" \
