@@ -1,4 +1,13 @@
-"""S01: дымовой тест контракта — эндпоинты spec §4 отвечают валидными по схемам объектами."""
+"""S01: дымовой тест контракта — эндпоинты spec §4 отвечают валидными по схемам объектами.
+
+Асинхронный контракт (S01 + S08): POST создаёт запуск и сразу отвечает 201 {run_id}, анализ
+идёт в фоне. GET статуса в любой момент — валидный RunStatus; итог — done | partial | error.
+Отчёт — 200 и валидный Report после done/partial, 404 `run_failed` после error; до итога —
+404 `report_not_ready` (проверяет test_runs.py: момент до итога тест поймать не может).
+"""
+
+import time
+from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
@@ -32,10 +41,34 @@ DOCX = (
 )
 
 
+FINAL_STATES = {"done", "partial", "error"}
+
+
+@pytest.fixture(autouse=True)
+def _runtime_dir(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    # Запуски пишут загруженные файлы и дамп в runtime_dir: в тестах — во временный каталог.
+    monkeypatch.setenv("RUNTIME_DIR", str(tmp_path / "runtime"))
+
+
 def _demo_run(client: TestClient) -> str:
     response = client.post("/api/runs/demo")
     assert response.status_code == 201, response.text
     return RunCreated.model_validate(response.json()).run_id
+
+
+def _wait_final(client: TestClient, run_id: str, timeout: float = 60.0) -> RunStatus:
+    """Опрашивает статус до итога; каждый ответ по дороге — валидный RunStatus этого запуска."""
+    deadline = time.monotonic() + timeout
+    while True:
+        response = client.get(f"/api/runs/{run_id}")
+        assert response.status_code == 200, response.text
+        status = RunStatus.model_validate(response.json())
+        assert status.run_id == run_id
+        if status.status in FINAL_STATES:
+            return status
+        if time.monotonic() > deadline:
+            pytest.fail(f"запуск {run_id} не дошёл до итога за {timeout} с: {status}")
+        time.sleep(0.02)
 
 
 def test_health(client: TestClient) -> None:
@@ -55,29 +88,31 @@ def test_docs_and_openapi_list_all_spec_endpoints(client: TestClient) -> None:
         assert methods <= set(paths[path]), f"{path}: нет методов {methods - set(paths[path])}"
 
 
-def test_demo_run_status_is_valid_and_queued(client: TestClient) -> None:
+def test_demo_run_status_is_valid_until_final(client: TestClient) -> None:
     run_id = _demo_run(client)
-    response = client.get(f"/api/runs/{run_id}")
-    assert response.status_code == 200
-    status = RunStatus.model_validate(response.json())
-    assert status.run_id == run_id
-    assert status.status == "queued"
-    assert status.progress == 0
-    assert status.missing_steps == []
+    status = _wait_final(client, run_id)
+    if status.status == "error":
+        assert status.detail, "ошибка без текста для пользователя"
+    else:
+        assert status.progress == 100
+        # partial — всегда с перечнем невыполненных шагов, done — без них.
+        assert bool(status.missing_steps) == (status.status == "partial")
 
 
-def test_demo_report_is_valid_empty_report(client: TestClient) -> None:
+def test_demo_report_follows_run_state(client: TestClient) -> None:
     run_id = _demo_run(client)
+    status = _wait_final(client, run_id)
     response = client.get(f"/api/runs/{run_id}/report")
-    assert response.status_code == 200
+    if status.status == "error":
+        assert response.status_code == 404
+        body = response.json()
+        assert body["error"] == "run_failed" and body["detail"]
+        return
+    assert response.status_code == 200, response.text
     report = Report.model_validate(response.json())
     assert report.run_id == run_id
-    assert report.before_documents == [] and report.after_documents == []
-    assert report.unit_changes == [] and report.function_matches == []
-    assert report.duplicates == [] and report.conflicts == [] and report.constraints == []
-    assert report.recommendations == []
-    assert set(report.stats) == set(STATS_KEYS)
-    assert all(value == 0 for value in report.stats.values())
+    # Обязательные ключи stats есть всегда; модуль может добавить свои счётчики.
+    assert set(STATS_KEYS) <= set(report.stats)
 
 
 def test_report_md_is_markdown(client: TestClient) -> None:
@@ -107,15 +142,18 @@ def test_unknown_run_is_json_404(client: TestClient) -> None:
         assert "nope" in body["detail"]
 
 
-def test_upload_docx_creates_queued_run(client: TestClient) -> None:
+def test_upload_docx_creates_run_and_bad_file_is_honest_error(client: TestClient) -> None:
     response = client.post(
         "/api/runs",
         files=[("before", ("до.docx", *DOCX[1:])), ("after", ("после.docx", *DOCX[1:]))],
     )
     assert response.status_code == 201, response.text
     run_id = RunCreated.model_validate(response.json()).run_id
-    status = RunStatus.model_validate(client.get(f"/api/runs/{run_id}").json())
-    assert status.status == "queued"
+    status = _wait_final(client, run_id)
+    # Заглушка не разбирается как .docx: запуск — error с именем файла, процесс жив.
+    assert status.status == "error"
+    assert "до.docx" in (status.detail or "")
+    assert client.get("/health").status_code == 200
 
 
 def test_upload_rejects_non_docx_with_422_json(client: TestClient) -> None:
