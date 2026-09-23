@@ -84,6 +84,9 @@ GET  /api/runs/{run_id}/report.md         → text/markdown (скачать за
 
 Все схемы `additionalProperties: false`, все поля обязательные; `clause_number` (в том числе `after_ids`, `nearest_clause_number`, `context_clause_numbers`) только из переданного списка (проверяется кодом, иначе находка отбрасывается). Похожесть (сигнатура, BM25, косинус) статус не ставит — только эти вызовы.
 
+
+**Пустые значения.** В моделях домена (`schemas.py`, `types.ts`) отсутствующее значение — `null`/`None`. В JSON-схемах LLM-вызовов все поля обязательны (strict), поэтому там отсутствующее строковое значение — пустая строка `""`, которую код при конвертации в модели домена превращает в `None`.
+
 ## 6. Фронтенд (Next.js App Router, RU)
 Страницы: `/` (загрузка + тестовый комплект), `/runs/[id]` (прогресс), `/report/[id]` (вкладки + панель источника). Компоненты: `UploadBox`, `RunProgress`, `UnitsTable`, `FunctionMatrix` (связи один-ко-многим, блоки «Ограничения» и «Кандидаты в потери — требует проверки»), `DuplicatesList`, `ConflictsList`, `ConclusionView`, `SourceDrawer`, `StatusBadge` (в том числе метки `verification` и «требует проверки»). Все ошибки — понятным текстом.
 
