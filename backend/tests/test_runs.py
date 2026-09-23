@@ -11,7 +11,9 @@ import time
 import types
 import typing
 from collections.abc import Iterator
+from io import BytesIO
 from pathlib import Path
+from zipfile import ZIP_DEFLATED, ZipFile
 
 import pytest
 from fastapi.testclient import TestClient
@@ -47,6 +49,41 @@ ALL_STEPS = [
     "conclusion",
 ]
 DOCX_MIME = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+
+
+def _docx_bytes() -> bytes:
+    """Настоящий минимальный .docx с пунктом, пригодный для проверки содержимого."""
+    content = BytesIO()
+    with ZipFile(content, "w", ZIP_DEFLATED) as archive:
+        archive.writestr(
+            "[Content_Types].xml",
+            '<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">'
+            '<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.'
+            'relationships+xml"/>'
+            '<Default Extension="xml" ContentType="application/xml"/>'
+            '<Override PartName="/word/document.xml" '
+            'ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/>'
+            "</Types>",
+        )
+        archive.writestr(
+            "_rels/.rels",
+            '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
+            '<Relationship Id="rId1" '
+            'Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/'
+            'officeDocument" '
+            'Target="word/document.xml"/>'
+            "</Relationships>",
+        )
+        archive.writestr(
+            "word/document.xml",
+            '<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">'
+            '<w:body><w:p><w:r><w:t>1.1. Тестовый пункт.</w:t></w:r></w:p></w:body>'
+            "</w:document>",
+        )
+    return content.getvalue()
+
+
+DOCX_BYTES = _docx_bytes()
 
 
 @pytest.fixture
@@ -471,6 +508,36 @@ def test_missing_mock_fixture_is_error_with_key_hint(
     assert "units" in status.missing_steps
 
 
+def test_missing_conclusion_fixture_keeps_partial_report(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def write_conclusion(facts, llm):
+        raise LLMError("no mock fixture (ожидался файл /srv/app/mocks/write_conclusion/abc.json)")
+
+    fake_modules(
+        monkeypatch,
+        {},
+        conclusion={
+            "build_facts": lambda report: {"findings": 2},
+            "write_conclusion": write_conclusion,
+        },
+    )
+    run_id = run_demo(client)
+    status, _ = wait_final(client, run_id)
+    assert status.status == "partial"
+    assert status.missing_steps == ["conclusion"]
+    assert "Нет фикстуры mocks/write_conclusion/abc.json" in (status.detail or "")
+
+    response = client.get(f"/api/runs/{run_id}/report")
+    assert response.status_code == 200, response.text
+    report = Report.model_validate(response.json())
+    assert_honest_report(report)
+    assert report.unit_changes and report.function_matches
+    assert "Заключение не сформировано" in report.conclusion_md
+    assert "Нет фикстуры" in report.conclusion_md
+    assert client.get(f"/api/runs/{run_id}/report.md").status_code == 200
+
+
 def test_step_exception_is_partial_and_process_survives(
     client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -517,7 +584,7 @@ def test_upload_rejects_pdf_as_not_supported(client: TestClient) -> None:
         "/api/runs",
         files=[
             ("before[]", ("до.pdf", b"%PDF-1.4", "application/pdf")),
-            ("after[]", ("после.docx", b"PK\x03\x04", DOCX_MIME)),
+            ("after[]", ("после.docx", DOCX_BYTES, DOCX_MIME)),
         ],
     )
     assert response.status_code == 422
@@ -534,8 +601,8 @@ def test_upload_with_bracket_fields_saves_files_and_runs(
     response = client.post(
         "/api/runs",
         files=[
-            ("before[]", ("../до.docx", b"PK\x03\x04 before", DOCX_MIME)),
-            ("after[]", ("после.docx", b"PK\x03\x04 after", DOCX_MIME)),
+            ("before[]", ("../до.docx", DOCX_BYTES, DOCX_MIME)),
+            ("after[]", ("после.docx", DOCX_BYTES, DOCX_MIME)),
         ],
     )
     assert response.status_code == 201, response.text
@@ -544,7 +611,7 @@ def test_upload_with_bracket_fields_saves_files_and_runs(
     assert status.status == "done", status.detail
     assert calls["parsed"] == [("до.docx", "before"), ("после.docx", "after")]
     saved = store.run_dir(run_id)
-    assert (saved / "before" / "01_до.docx").read_bytes() == b"PK\x03\x04 before"
+    assert (saved / "before" / "01_до.docx").read_bytes() == DOCX_BYTES
     assert (saved / "after" / "01_после.docx").is_file()
     assert (saved.parent / f"{run_id}.json").is_file(), "дамп запуска в runtime_dir"
 
@@ -683,9 +750,9 @@ def test_several_documents_per_version_reach_units_step(
     response = client.post(
         "/api/runs",
         files=[
-            ("before[]", ("положение.docx", b"PK\x03\x04 a", DOCX_MIME)),
-            ("before[]", ("ди.docx", b"PK\x03\x04 b", DOCX_MIME)),
-            ("after[]", ("положение-9.docx", b"PK\x03\x04 c", DOCX_MIME)),
+            ("before[]", ("положение.docx", DOCX_BYTES, DOCX_MIME)),
+            ("before[]", ("ди.docx", DOCX_BYTES, DOCX_MIME)),
+            ("after[]", ("положение-9.docx", DOCX_BYTES, DOCX_MIME)),
         ],
     )
     assert response.status_code == 201, response.text

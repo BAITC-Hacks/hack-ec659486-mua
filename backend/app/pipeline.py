@@ -5,7 +5,8 @@ conflicts → conclusion → done | partial | error.
 - модуля (или нужной функции в нём) ещё нет → шаг пропущен, записан в `missing_steps` с причиной,
   прогон идёт дальше; зависящие от него шаги тоже пропускаются с честной причиной;
 - модуль есть, но его импорт падает (сломанная зависимость) → статус `error`;
-- LLMError (в mock — нет фикстуры) → статус `error` с русским текстом;
+- LLMError (в mock — нет фикстуры) → статус `error` с русским текстом; на шаге
+  заключения уже собранные результаты сохраняются, статус `partial`;
 - любое другое исключение внутри шага → шаг не выполнен (`partial`), остальные шаги идут дальше.
 `done` — только если выполнены все семь шагов; «изменений не найдено» без полного анализа
 не пишется.
@@ -341,10 +342,16 @@ async def _conclusion(run: _Run) -> None:
         run.conclusion_md = CONCLUSION_NOT_IMPLEMENTED
         run.skip("conclusion", exc.reason)
     else:
-        facts = await asyncio.to_thread(build_facts, _build_report(run))
-        result = await asyncio.to_thread(write_conclusion, facts, run.llm)
-        run.conclusion_md = str(_field(result, "conclusion_md") or "").strip()
-        run.recommendations = [str(item) for item in _field(result, "recommendations") or []]
+        try:
+            facts = await asyncio.to_thread(build_facts, _build_report(run))
+            result = await asyncio.to_thread(write_conclusion, facts, run.llm)
+        except LLMError as exc:
+            reason = _llm_error_text(exc, "conclusion", run.llm.mode)
+            run.conclusion_md = f"Заключение не сформировано: {reason}"
+            run.skip("conclusion", reason, "failed")
+        else:
+            run.conclusion_md = str(_field(result, "conclusion_md") or "").strip()
+            run.recommendations = [str(item) for item in _field(result, "recommendations") or []]
     await _export(run)
 
 

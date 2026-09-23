@@ -7,7 +7,9 @@
 """
 
 import time
+from io import BytesIO
 from pathlib import Path
+from zipfile import ZIP_DEFLATED, ZipFile
 
 import pytest
 from fastapi.testclient import TestClient
@@ -34,9 +36,41 @@ SPEC_PATHS = {
     "/api/runs/{run_id}/report.md": {"get"},
 }
 
+def _docx_bytes() -> bytes:
+    """Минимальный документ Word с нумерованным пунктом для проверки загрузки."""
+    content = BytesIO()
+    with ZipFile(content, "w", ZIP_DEFLATED) as archive:
+        archive.writestr(
+            "[Content_Types].xml",
+            '<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">'
+            '<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.'
+            'relationships+xml"/>'
+            '<Default Extension="xml" ContentType="application/xml"/>'
+            '<Override PartName="/word/document.xml" '
+            'ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/>'
+            "</Types>",
+        )
+        archive.writestr(
+            "_rels/.rels",
+            '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
+            '<Relationship Id="rId1" '
+            'Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/'
+            'officeDocument" '
+            'Target="word/document.xml"/>'
+            "</Relationships>",
+        )
+        archive.writestr(
+            "word/document.xml",
+            '<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">'
+            '<w:body><w:p><w:r><w:t>1.1. Тестовый пункт.</w:t></w:r></w:p></w:body>'
+            "</w:document>",
+        )
+    return content.getvalue()
+
+
 DOCX = (
     "f.docx",
-    b"PK\x03\x04 fake",
+    _docx_bytes(),
     "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
 )
 
@@ -142,7 +176,7 @@ def test_unknown_run_is_json_404(client: TestClient) -> None:
         assert "nope" in body["detail"]
 
 
-def test_upload_docx_creates_run_and_bad_file_is_honest_error(client: TestClient) -> None:
+def test_upload_docx_creates_run(client: TestClient) -> None:
     response = client.post(
         "/api/runs",
         files=[("before", ("до.docx", *DOCX[1:])), ("after", ("после.docx", *DOCX[1:]))],
@@ -150,9 +184,8 @@ def test_upload_docx_creates_run_and_bad_file_is_honest_error(client: TestClient
     assert response.status_code == 201, response.text
     run_id = RunCreated.model_validate(response.json()).run_id
     status = _wait_final(client, run_id)
-    # Заглушка не разбирается как .docx: запуск — error с именем файла, процесс жив.
-    assert status.status == "error"
-    assert "до.docx" in (status.detail or "")
+    assert status.status in FINAL_STATES
+    assert "не читается как .docx" not in (status.detail or "")
     assert client.get("/health").status_code == 200
 
 
