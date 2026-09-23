@@ -178,11 +178,11 @@ def test_clauses_assigned_to_one_owner(kit: dict[str, Any]) -> None:
         clause = _clause(kit[version], number)
         return next(names[uid] for uid, cl in groups.items() if uid and clause in cl)
 
-    assert "(ДНМ)" in owner("before", "5.4.4.а")  # вводная «Директор департамента … мониторинга»
-    assert "(ДНМ)" in owner("before", "5.7.1")  # вводная «Директор ДНМ обязан …, имеет право:»
-    assert "(ДККМ)" in owner("before", "5.5.11")  # «формирует план работ БВА» — но под ДККМ
+    assert "ДНМ" in owner("before", "5.4.4.а")  # вводная «Директор департамента … мониторинга»
+    assert "ДНМ" in owner("before", "5.7.1")  # вводная «Директор ДНМ обязан …, имеет право:»
+    assert "ДККМ" in owner("before", "5.5.11")  # «формирует план работ БВА» — но под ДККМ
     assert owner("before", "5.3.4.а") == "Направление внутреннего аудита"
-    assert "(ДИТААД)" in owner("after", "5.3.2.а")  # вводная называет двоих, пункт — одного
+    assert "ДИТААД" in owner("after", "5.3.2.а")  # вводная называет двоих, пункт — одного
     assert "БВА" in owner("after", "5.3.1")  # вводная на двоих → общий родитель
     assert "БВА" in owner("after", "4.4.а")  # «…, БВА:»
 

@@ -408,6 +408,21 @@ def test_match_units_pairs_are_validated() -> None:
     assert by_status["created"].unit_after.id == "a1"
 
 
+def check_kit_invariants(result: UnitsResult, before: Document, after: Document) -> None:
+    """Инварианты при любом ответе модели: источники, дословные цитаты, должности, контракт S08."""
+    assert result, "подразделения не найдены"
+    for change in result:
+        assert change.sources, f"{change.id} без источников"
+        assert change.note.strip()
+    texts = {(d.id, c.id): c.text for d in (before, after) for c in d.clauses}
+    for change in result:
+        for src in change.sources:
+            assert src.quote and src.quote in texts[(src.doc_id, src.clause_id)]
+    assert "Главный аудитор" in {p.name for p in result.positions_before}
+    assert "Главный аудитор" not in {u.name for u in result.units_before + result.units_after}
+    TypeAdapter(list[UnitChange]).validate_python(result)
+
+
 def check_kit_result(result: UnitsResult, before: Document, after: Document) -> None:
     """Ожидаемое на тестовом комплекте (ред. 8 → ред. 9, эталон data/case11/diff-8-vs-9.md)."""
     assert result, "подразделения не найдены"
@@ -465,11 +480,13 @@ def test_case11_kit(kit: tuple[Document, Document]) -> None:
 
 
 def test_case11_kit_with_s04_parser() -> None:
+    # Путь через парсер S04 совпадает с демо: фикстура — живой ответ модели (S15), он может
+    # расходиться с эталоном; строгая сверка с эталоном — в test_case11_kit на ручной фикстуре.
     """Тот же сценарий на разборе S04: фикстуры лежат и под его хэши входа (демо в mock-режиме)."""
     parse = pytest.importorskip("app.parse.docx", reason="парсер S04 ещё не влит в ветку")
     before = parse.parse_docx(DATA_DIR / DOC_BEFORE, "before")
     after = parse.parse_docx(DATA_DIR / DOC_AFTER, "after")
-    check_kit_result(detect_units(before, after, mock_llm()), before, after)
+    check_kit_invariants(detect_units(before, after, mock_llm()), before, after)
 
 
 def test_missing_fixture_raises_llm_error() -> None:

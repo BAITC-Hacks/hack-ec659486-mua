@@ -15,13 +15,13 @@ cd "$(dirname "$0")/.."
 export LLM_MODE=mock          # переменные окружения приоритетнее .env при интерполяции compose
 BACKEND=${BACKEND:-http://localhost:8000}
 FRONTEND=${FRONTEND:-http://localhost:3000}
-DEADLINE=$((SECONDS + 180))
 
 fail() { echo "SMOKE FAILED: $*" >&2; echo "--- логи backend ---" >&2; docker compose logs --tail 40 backend >&2 || true; exit 1; }
 
 [ -f .env ] || cp .env.example .env
 docker compose up --build -d
 docker compose ps
+DEADLINE=$((SECONDS + 180))
 
 echo "== ждём готовности сервисов (до 180 с)"
 until curl -fsS "$BACKEND/health" >/dev/null 2>&1 && curl -fsS -o /dev/null "$FRONTEND/" 2>/dev/null; do
@@ -49,10 +49,7 @@ while :; do
     <<<"$RUN_STATUS") || fail "неверный ответ статуса: $RUN_STATUS"
   case "$STATE" in
     done) break ;;
-    partial)
-      echo "Анализ завершён частично. missing_steps: $(python3 -c \
-        'import json,sys; print(json.load(sys.stdin).get("missing_steps", []))' <<<"$RUN_STATUS")"
-      break ;;
+    partial) fail "анализ завершился частично: $RUN_STATUS" ;;
     error) fail "анализ завершился ошибкой: $RUN_STATUS" ;;
   esac
   [ $SECONDS -lt $RUN_DEADLINE ] || fail "анализ не завершился за 120 с: $RUN_STATUS"
@@ -64,6 +61,9 @@ python3 -c 'import json,sys; r=json.load(sys.stdin); required=("unit_changes","f
   <<<"$REPORT" || fail "в отчёте нет подразделений, функций или дублей"
 MARKDOWN=$(curl -fsS "$BACKEND/api/runs/$RUN_ID/report.md") || fail "экспорт .md недоступен"
 [ -n "$MARKDOWN" ] || fail "экспорт .md пуст"
+FRONTEND_MARKDOWN=$(curl -fsS "$FRONTEND/api/runs/$RUN_ID/report.md") || \
+  fail "экспорт .md через frontend недоступен"
+[ "$FRONTEND_MARKDOWN" = "$MARKDOWN" ] || fail "экспорт frontend отличается от backend"
 
 echo "== backend: PDF отклоняется как неподдерживаемый формат"
 PDF_RESPONSE=$(curl -sS -w '\n%{http_code}' -X POST "$BACKEND/api/runs" \

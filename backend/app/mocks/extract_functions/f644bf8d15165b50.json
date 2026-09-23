@@ -64,7 +64,7 @@
       "text": "готовит отчеты об итогах выполнения плана работы БВА в соответствии с требованиями настоящего Положения",
       "category": "duty",
       "executor": "Директор ДККМ",
-      "modality": "duty",
+      "modality": "neutral",
       "clause_number": "5.5.3",
       "context_clause_numbers": [
         "5.5"
@@ -124,7 +124,7 @@
       "text": "консолидирует полученные предложения по плану",
       "category": "duty",
       "executor": "Директор ДККМ",
-      "modality": "duty",
+      "modality": "neutral",
       "clause_number": "5.5.7",
       "context_clause_numbers": [
         "5.5"

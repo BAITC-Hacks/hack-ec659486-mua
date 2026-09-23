@@ -114,7 +114,8 @@ def test_demo_finds_changes_and_opens_real_sources(
         and change.unit_before is not None
         and "направление внутреннего аудита" in _norm(change.unit_before.name)
         and any(
-            "директор направления внутреннего аудита" in _norm(source.quote)
+            "директор" in _norm(source.quote)
+            and "направления внутреннего аудита" in _norm(source.quote)
             for source in change.sources
         )
         for change in report.unit_changes
@@ -149,8 +150,6 @@ def test_demo_finds_changes_and_opens_real_sources(
                 _check_source(client, run_id, source)
                 checked.add(key)
 
-    if status.status == "partial" and status.missing_steps == ["conclusion"]:
-        pytest.xfail(f"ожидается фикстура S15 для заключения: {status.detail}")
     assert status.status == "done", (
         f"анализ не завершился полностью: {status.status}, "
         f"missing_steps={status.missing_steps}, detail={status.detail}"
