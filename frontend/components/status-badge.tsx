@@ -1,6 +1,7 @@
 import { Badge } from "@/components/ui/badge";
 
 export type Status = "kept" | "changed" | "lost" | "new" | "moved" | "created" | "abolished" | "transformed";
+export type Verification = "exact" | "lexical" | "llm";
 
 const statusLabels: Record<Status, { label: string; variant: "success" | "warning" | "danger" | "default" }> = {
   kept: { label: "Сохранена", variant: "success" },
@@ -13,7 +14,27 @@ const statusLabels: Record<Status, { label: string; variant: "success" | "warnin
   transformed: { label: "Преобразовано", variant: "warning" },
 };
 
-export function StatusBadge({ status }: { status: Status }) {
+const verificationLabels: Record<Verification, string> = {
+  exact: "Дословно",
+  lexical: "По тексту",
+  llm: "Проверено моделью",
+};
+
+export function StatusBadge({
+  status,
+  verified,
+  verification,
+}: {
+  status: Status;
+  verified?: boolean;
+  verification?: Verification;
+}) {
   const { label, variant } = statusLabels[status];
-  return <Badge variant={variant}>{label}</Badge>;
+  return (
+    <span className="inline-flex flex-wrap items-center gap-1.5">
+      <Badge variant={variant}>{label}</Badge>
+      {verification ? <Badge variant="muted">{verificationLabels[verification]}</Badge> : null}
+      {verified === false ? <Badge variant="warning">Требует проверки</Badge> : null}
+    </span>
+  );
 }
