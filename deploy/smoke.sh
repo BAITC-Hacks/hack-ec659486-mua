@@ -15,13 +15,13 @@ cd "$(dirname "$0")/.."
 export LLM_MODE=mock          # переменные окружения приоритетнее .env при интерполяции compose
 BACKEND=${BACKEND:-http://localhost:8000}
 FRONTEND=${FRONTEND:-http://localhost:3000}
-DEADLINE=$((SECONDS + 180))
 
 fail() { echo "SMOKE FAILED: $*" >&2; echo "--- логи backend ---" >&2; docker compose logs --tail 40 backend >&2 || true; exit 1; }
 
 [ -f .env ] || cp .env.example .env
 docker compose up --build -d
 docker compose ps
+DEADLINE=$((SECONDS + 180))
 
 echo "== ждём готовности сервисов (до 180 с)"
 until curl -fsS "$BACKEND/health" >/dev/null 2>&1 && curl -fsS -o /dev/null "$FRONTEND/" 2>/dev/null; do
