@@ -14,7 +14,7 @@ export function ConclusionView({ conclusion_md, run_id, sources = [], onSource }
   conclusion_md: string; run_id: string; sources?: Source[]; onSource: SourceHandler;
 }) {
   function references(text: string) {
-    const numbers = new Set(text.match(/\d+(?:\.\d+)+/g) ?? []);
+    const numbers = new Set(text.match(/\d+(?:\.\d+)+(?:\.[а-яёa-z])?/gi) ?? []);
     const referenced = sources.filter((source) => source.clause_number !== null && numbers.has(source.clause_number));
     return <div className="mt-2 space-y-2">{(["before", "after"] as const).map((version) => {
       const items = referenced.filter((source) => source.version === version);
@@ -23,6 +23,19 @@ export function ConclusionView({ conclusion_md, run_id, sources = [], onSource }
         <SourceButtons sources={items} onSource={onSource} />
       </div> : null;
     })}</div>;
+  }
+
+  function sourcedText(text: string) {
+    const sourceStart = text.indexOf(" Источники:");
+    if (sourceStart === -1) return <>{bold(text)}{references(text)}</>;
+    return <>
+      <p>{bold(text.slice(0, sourceStart))}</p>
+      <details className="mt-2 rounded-lg border border-border p-3">
+        <summary className="cursor-pointer text-sm text-muted-foreground">Источники и цитаты</summary>
+        <p className="mt-3 text-sm">{bold(text.slice(sourceStart + 1))}</p>
+        {references(text)}
+      </details>
+    </>;
   }
 
   const blocks: ReactNode[] = [];
@@ -45,7 +58,7 @@ export function ConclusionView({ conclusion_md, run_id, sources = [], onSource }
       while (index < lines.length) {
         const item = /^(\d+\.|[-*])\s+(.+)$/.exec(lines[index].trim());
         if (!item || /^\d/.test(item[1]) !== ordered) break;
-        items.push(<li key={index} className="pl-1">{bold(item[2])}{references(item[2])}</li>);
+        items.push(<li key={index} className="pl-1">{sourcedText(item[2])}</li>);
         index++;
       }
       blocks.push(ordered ? <ol key={start} start={parseInt(list[1], 10)} className="list-decimal space-y-4 pl-6">{items}</ol>
@@ -58,7 +71,7 @@ export function ConclusionView({ conclusion_md, run_id, sources = [], onSource }
       paragraph.push(lines[index++].trim());
     }
     const text = paragraph.join(" ");
-    blocks.push(<div key={start}><p>{bold(text)}</p>{references(text)}</div>);
+    blocks.push(<div key={start}>{sourcedText(text)}</div>);
   }
 
   return <section className="space-y-6">
