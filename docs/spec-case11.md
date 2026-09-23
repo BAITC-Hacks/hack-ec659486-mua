@@ -75,4 +75,4 @@ GET  /api/runs/{run_id}/report.md         → text/markdown (скачать за
 Вне ядра: PDF/Excel-разбор, сравнение с НПА (опц. 1), бенчмарк с другими операторами (опц. 2), редактирование отчёта, авторизация, БД. Рекомендации (опц. 3) — только если P6 готов к 16:30.
 
 ## 8. Раскрытие (в README, раздел 12)
-Каркас FastAPI + Next.js + compose (подготовлен 22.09); `backend/app/prebuilt/lib_docx.py`, `lib_normalize.py` из проекта команды `Astana-Medical-University/---` (см. `backend/app/prebuilt/NOTICE.md`); документы тестового комплекта — от организаторов; промпты, схемы, вся логика P2–P6 и интерфейс — 23.09.
+Каркас FastAPI + Next.js + compose (подготовлен 22.09); `backend/app/prebuilt/lib_docx.py`, `lib_normalize.py` — внутренние утилиты команды, написанные ранее (см. `backend/app/prebuilt/NOTICE.md`); документы тестового комплекта — от организаторов; промпты, схемы, вся логика P2–P6 и интерфейс — 23.09.

@@ -16,7 +16,7 @@ ROOT="$(git rev-parse --show-toplevel)"
 cd "$ROOT"
 WT=${3:-../wt-$(basename "$BR")}
 
-# BASE_REF=origin/prep/laptop-setup — для репетиции в dev-репо, где main не содержит каркас
+# BASE_REF=origin/<ветка> — если базой служит не main
 BASE_REF=${BASE_REF:-origin/main}
 git fetch -q origin "${BASE_REF#origin/}" 2>/dev/null || echo "fetch не прошёл, беру локальную ссылку"
 BASE=$(git rev-parse --verify -q "$BASE_REF" || git rev-parse --verify -q "${BASE_REF#origin/}" || git rev-parse main)

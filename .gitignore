@@ -31,7 +31,7 @@ htmlcov/
 # --- данные ---
 data/*.zip
 data/*.csv.gz
-# Runtime-состояние приложения (загруженные когорты, сессии МРТ): не версионируется.
+# Runtime-состояние приложения (загруженные документы, запуски): не версионируется.
 data/runtime/
 # Маркер сессии в worktree: имя инструмента для трейлера соавтора (см. scripts/hooks/prepare-commit-msg).
 .session
@@ -46,7 +46,6 @@ Thumbs.db
 setup/*.deb
 setup/install.log
 # datasets (large, downloaded by scripts; see docs/08)
-data/oulad/
-data/uci/
 *.zip
 data/case11/*.txt
+backend/data/runs/

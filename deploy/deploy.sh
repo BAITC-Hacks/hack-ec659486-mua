@@ -9,7 +9,7 @@ cd "$(dirname "$0")/.."
 rsync -az --delete \
   --exclude .git --exclude .venv --exclude node_modules --exclude .next \
   --include '.env.example' --exclude '.env*' \
-  --exclude 'data/runtime' --exclude 'data/oulad' --exclude 'data/uci' \
+  --exclude 'data/runtime' \
   --exclude __pycache__ --exclude .pytest_cache --exclude .ruff_cache \
   ./ "$HOST:/opt/app/"
 ssh "$HOST" 'cd /opt/app
