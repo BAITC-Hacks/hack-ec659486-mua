@@ -1,0 +1,110 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="1420" viewBox="0 0 1600 1420" role="img" aria-labelledby="title desc">
+  <title id="title">ОргДифф — от двух редакций документа к проверяемому выводу</title>
+  <desc id="desc">Пайплайн P1–P6: код разбирает документы, ищет кандидатов и проверяет источники; языковая модель извлекает сущности, проверяет смысл и пишет заключение. Каждый вывод содержит документ, версию, номер пункта и цитату, которые доступны через API и панель источника.</desc>
+  <defs>
+    <marker id="arrow" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto"><path d="M1 1 L8 5 L1 9" fill="none" stroke="#64748b" stroke-width="2"/></marker>
+    <style>
+      text {font-family:"DejaVu Sans",sans-serif;fill:#172b45}
+      .title {font-size:39px;font-weight:700}.subtitle {font-size:23px;fill:#526579}
+      .heading {font-size:27px;font-weight:700}.body {font-size:20px}.small {font-size:18px;fill:#526579}
+      .label {font-size:17px;font-weight:700;letter-spacing:1px}.code {fill:#175b9f}.llm {fill:#763faa}
+      .mono {font-family:"DejaVu Sans Mono",monospace;font-size:20px;fill:#763faa}
+      .card {fill:#fff;stroke:#d7e0eb;stroke-width:1.5}.flow {fill:none;stroke:#64748b;stroke-width:2.5;marker-end:url(#arrow)}
+    </style>
+  </defs>
+  <rect width="1600" height="1420" fill="#f4f7fb"/>
+  <text x="50" y="69" class="title">ОргДифф · архитектура анализа</text>
+  <text x="50" y="109" class="subtitle">Две редакции .docx → сравнение функций → вывод с пунктом-источником</text>
+  <rect x="50" y="141" width="16" height="16" rx="4" fill="#175b9f"/><text x="78" y="156" class="body code">Код · детерминированная обработка</text>
+  <rect x="610" y="141" width="16" height="16" rx="4" fill="#763faa"/><text x="638" y="156" class="body llm">LLM · языковые шаги</text>
+  <text x="1160" y="156" class="small">Пайплайн P1–P6 · FastAPI + Next.js</text>
+
+  <path d="M490 330 H570" class="flow"/><path d="M1020 330 H1100" class="flow"/>
+  <path d="M1330 460 V509" class="flow"/>
+  <path d="M1110 670 H1030" class="flow"/><path d="M580 670 H500" class="flow"/>
+  <path d="M270 820 V869" class="flow"/>
+  <path d="M490 993 H570" class="flow"/><path d="M1020 993 H1100" class="flow"/>
+
+  <rect x="50" y="200" width="440" height="260" rx="20" class="card"/>
+  <text x="76" y="237" class="label code">ВХОД · ДО / ПОСЛЕ</text>
+  <text x="76" y="279" class="heading">Документы .docx</text>
+  <text x="76" y="320" class="body">Положения, ДИ, приложения</text>
+  <text x="76" y="351" class="body">Тестовый комплект: редакции 8 и 9</text>
+  <text x="76" y="382" class="body">Положения о внутреннем аудите</text>
+  <text x="76" y="429" class="small">Код: формат и лимиты загрузки</text>
+
+  <rect x="580" y="200" width="440" height="260" rx="20" class="card"/>
+  <text x="606" y="237" class="label code">P1 · КОД</text>
+  <text x="606" y="279" class="heading">Пункты + контекст</text>
+  <text x="606" y="320" class="body">Номер, текст, раздел, порядок</text>
+  <text x="606" y="351" class="body">Таблицы → строки; без оглавления</text>
+  <text x="606" y="386" class="small">section_path · lead_in · modality</text>
+  <text x="606" y="429" class="small">app/parse → исходные пункты</text>
+
+  <rect x="1110" y="200" width="440" height="260" rx="20" class="card"/>
+  <text x="1136" y="237" class="label">P2 · ПОДРАЗДЕЛЕНИЯ</text>
+  <text x="1136" y="279" class="heading">Структура до ↔ после</text>
+  <text x="1136" y="320" class="body code">Код: словарь и нормализация имён</text>
+  <text x="1136" y="355" class="mono">extract_units</text>
+  <text x="1136" y="386" class="mono">match_units</text>
+  <text x="1136" y="429" class="small">Сохранено / преобразовано / создано</text>
+
+  <rect x="1110" y="520" width="440" height="300" rx="20" class="card"/>
+  <text x="1136" y="557" class="label">P3 · ФУНКЦИИ</text>
+  <text x="1136" y="599" class="heading">Атомарные функции</text>
+  <text x="1136" y="641" class="mono">extract_functions</text>
+  <text x="1136" y="680" class="body">Функция, исполнитель, пункт</text>
+  <text x="1136" y="711" class="body">и контекст формулировки</text>
+  <text x="1136" y="755" class="small">Запреты → отдельные ограничения;</text>
+  <text x="1136" y="783" class="small">не участвуют в поиске потерь и дублей</text>
+
+  <rect x="580" y="520" width="440" height="300" rx="20" class="card"/>
+  <text x="606" y="557" class="label">P4 · ГИБРИДНОЕ СОПОСТАВЛЕНИЕ</text>
+  <text x="606" y="599" class="heading">Кандидаты → проверка</text>
+  <text x="606" y="635" class="body code">Код: BM25 + сигнатуры + RRF</text>
+  <text x="606" y="665" class="small">Опционально: embeddings из кэша/API</text>
+  <text x="606" y="707" class="mono">verify_matches</text>
+  <text x="606" y="740" class="mono">confirm_loss</text>
+  <text x="606" y="783" class="small">Потеря: поиск по всей редакции «после»</text>
+
+  <rect x="50" y="520" width="440" height="300" rx="20" class="card"/>
+  <text x="76" y="557" class="label">P4–P5 · ДУБЛИ И КОНФЛИКТЫ</text>
+  <text x="76" y="597" class="body code">Код: кандидаты дублей; правила а–г</text>
+  <text x="76" y="628" class="small">а · исполнение + контроль одного объекта</text>
+  <text x="76" y="655" class="small">б · инициирование + утверждение</text>
+  <text x="76" y="682" class="small">в · операционная роль у аудитора</text>
+  <text x="76" y="709" class="small">г · контролируемый контролирует себя</text>
+  <text x="76" y="751" class="mono">verify_duplicates</text>
+  <text x="76" y="784" class="mono">explain_conflict</text>
+
+  <rect x="50" y="880" width="440" height="225" rx="20" class="card"/>
+  <text x="76" y="917" class="label">P6 · ЗАКЛЮЧЕНИЕ</text>
+  <text x="76" y="959" class="heading">Факты → рекомендации</text>
+  <text x="76" y="999" class="mono">write_conclusion</text>
+  <text x="76" y="1036" class="body">Подтверждённые факты P2–P5</text>
+  <text x="76" y="1074" class="small">Код: проверка ссылок и экспорт .md</text>
+
+  <rect x="580" y="880" width="440" height="225" rx="20" class="card"/>
+  <text x="606" y="917" class="label code">API · FASTAPI</text>
+  <text x="606" y="959" class="heading">Отчёт и пункты</text>
+  <text x="606" y="999" class="body">Статус запуска · JSON отчёта</text>
+  <text x="606" y="1036" class="body">Пункт документа · Markdown</text>
+  <text x="606" y="1074" class="small">/api/runs/{id} · /health → режим LLM</text>
+
+  <rect x="1110" y="880" width="440" height="225" rx="20" class="card"/>
+  <text x="1136" y="917" class="label code">ЭКРАН · NEXT.JS</text>
+  <text x="1136" y="959" class="heading">Вывод → источник</text>
+  <text x="1136" y="999" class="body">Вкладки отчёта и статусы</text>
+  <text x="1136" y="1036" class="body">Клик по пункту → панель источника</text>
+  <text x="1136" y="1074" class="small">Документ · редакция · пункт · цитата</text>
+
+  <rect x="50" y="1151" width="1500" height="125" rx="18" fill="#e7f0fb"/>
+  <text x="76" y="1189" class="label code">СКВОЗНАЯ ПРОВЕРКА ИСТОЧНИКОВ · КОД</text>
+  <text x="76" y="1225" class="body">Вывод + {doc, version, clause_number, quote} → сверка номера пункта и цитаты с результатом P1 → API → экран</text>
+  <text x="76" y="1255" class="small">Несуществующие пункты отбрасываются. Неподтверждённые кандидаты отмечаются «требует проверки».</text>
+  <path d="M1330 1105 V1139" class="flow"/>
+
+  <rect x="50" y="1300" width="1500" height="76" rx="18" fill="#efe8f8"/>
+  <text x="76" y="1331" class="label llm">ВСЕ ЯЗЫКОВЫЕ ВЫЗОВЫ → app/llm.py · STRUCTURED OUTPUTS · JSON SCHEMA STRICT</text>
+  <text x="76" y="1360" class="small">live: OpenAI Responses API  ·  mock: сохранённые ответы по имени вызова и хэшу входа; индикатор режима в интерфейсе</text>
+</svg>
