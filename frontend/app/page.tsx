@@ -9,6 +9,8 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { ApiError } from "@/lib/api";
 import { createDemoRun, createRun } from "@/lib/api-runs";
 
+const MAX_TOTAL_FILES = 10;
+
 export default function HomePage() {
   const router = useRouter();
   const [before, setBefore] = useState<File[]>([]);
@@ -16,7 +18,9 @@ export default function HomePage() {
   const [pending, setPending] = useState<"upload" | "demo" | null>(null);
   const [error, setError] = useState<string | null>(null);
   const submitting = useRef(false);
-  const canAnalyze = before.length > 0 && after.length > 0;
+  const totalFiles = before.length + after.length;
+  const exceedsTotalLimit = totalFiles > MAX_TOTAL_FILES;
+  const canAnalyze = before.length > 0 && after.length > 0 && !exceedsTotalLimit;
 
   async function startRun(mode: "upload" | "demo") {
     if (submitting.current || (mode === "upload" && !canAnalyze)) return;
@@ -50,6 +54,13 @@ export default function HomePage() {
         <UploadBox label="После реорганизации" files={after} onChange={setAfter} disabled={pending !== null} />
       </div>
 
+      {exceedsTotalLimit ? (
+        <p id="total-files-error" role="alert" className="rounded-lg border border-danger/30 bg-danger/5 p-4 text-sm text-danger">
+          Выбрано файлов: {totalFiles}. Для анализа можно отправить не более {MAX_TOTAL_FILES} файлов
+          суммарно в комплектах «до» и «после». Уберите лишние файлы, чтобы продолжить.
+        </p>
+      ) : null}
+
       {error ? (
         <p role="alert" className="rounded-lg border border-danger/30 bg-danger/5 p-4 text-sm text-danger">
           {error}
@@ -60,12 +71,16 @@ export default function HomePage() {
         <Button
           size="lg"
           disabled={!canAnalyze || pending !== null}
+          aria-describedby={exceedsTotalLimit ? "total-files-error" : "upload-requirements"}
           loading={pending === "upload"}
           onClick={() => void startRun("upload")}
         >
           {pending === "upload" ? "Отправляем документы…" : "Проанализировать"}
         </Button>
-        <p className="text-sm text-muted-foreground">Для анализа добавьте хотя бы один документ в каждый комплект.</p>
+        <p id="upload-requirements" className="text-sm text-muted-foreground">
+          Добавьте хотя бы один документ в каждый комплект. Не более {MAX_TOTAL_FILES} файлов суммарно
+          в «до» и «после».
+        </p>
       </div>
 
       <Card>
