@@ -13,8 +13,8 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 
 export LLM_MODE=mock          # переменные окружения приоритетнее .env при интерполяции compose
-BACKEND=http://localhost:8000
-FRONTEND=http://localhost:3000
+BACKEND=${BACKEND:-http://localhost:8000}
+FRONTEND=${FRONTEND:-http://localhost:3000}
 DEADLINE=$((SECONDS + 180))
 
 fail() { echo "SMOKE FAILED: $*" >&2; echo "--- логи backend ---" >&2; docker compose logs --tail 40 backend >&2 || true; exit 1; }
@@ -35,16 +35,41 @@ echo "$HEALTH"
 grep -q '"status":"ok"' <<<"${HEALTH// /}" || fail "/health не вернул status=ok"
 grep -q '"llm_mode":"mock"' <<<"${HEALTH// /}" || fail "/health не в mock-режиме: $HEALTH"
 
-echo "== backend /api/example (основной сценарий на фикстуре)"
-EXAMPLE=$(curl -fsS -X POST "$BACKEND/api/example" \
-  -H 'content-type: application/json' -d '{"text":"smoke"}') || fail "POST /api/example вернул ошибку"
-echo "$EXAMPLE"
-grep -q '"answer"' <<<"$EXAMPLE" || fail "/api/example не вернул поле answer: $EXAMPLE"
+echo "== backend: контрольный комплект"
+CREATED=$(curl -fsS -X POST "$BACKEND/api/runs/demo") || fail "POST /api/runs/demo вернул ошибку"
+RUN_ID=$(python3 -c 'import json,sys; print(json.load(sys.stdin)["run_id"])' <<<"$CREATED") || \
+  fail "в ответе нет run_id: $CREATED"
+[ -n "$RUN_ID" ] || fail "пустой run_id: $CREATED"
 
-echo "== backend: невалидный вход отвергается с 422"
-CODE=$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BACKEND/api/example" \
-  -H 'content-type: application/json' -d '{}')
-[ "$CODE" = "422" ] || fail "пустой запрос дал HTTP $CODE вместо 422"
+echo "== ждём анализ $RUN_ID (до 120 с)"
+RUN_DEADLINE=$((SECONDS + 120))
+while :; do
+  RUN_STATUS=$(curl -fsS "$BACKEND/api/runs/$RUN_ID") || fail "статус запуска недоступен"
+  STATE=$(python3 -c 'import json,sys; print(json.load(sys.stdin)["status"])' \
+    <<<"$RUN_STATUS") || fail "неверный ответ статуса: $RUN_STATUS"
+  case "$STATE" in
+    done) break ;;
+    partial)
+      echo "Анализ завершён частично. missing_steps: $(python3 -c \
+        'import json,sys; print(json.load(sys.stdin).get("missing_steps", []))' <<<"$RUN_STATUS")"
+      break ;;
+    error) fail "анализ завершился ошибкой: $RUN_STATUS" ;;
+  esac
+  [ $SECONDS -lt $RUN_DEADLINE ] || fail "анализ не завершился за 120 с: $RUN_STATUS"
+  sleep 2
+done
+
+REPORT=$(curl -fsS "$BACKEND/api/runs/$RUN_ID/report") || fail "отчёт недоступен"
+python3 -c 'import json,sys; r=json.load(sys.stdin); required=("unit_changes","function_matches","duplicates"); missing=[key for key in required if not r.get(key)]; print("Отчёт:", {key:len(r.get(key,[])) for key in required}); sys.exit(bool(missing))' \
+  <<<"$REPORT" || fail "в отчёте нет подразделений, функций или дублей"
+MARKDOWN=$(curl -fsS "$BACKEND/api/runs/$RUN_ID/report.md") || fail "экспорт .md недоступен"
+[ -n "$MARKDOWN" ] || fail "экспорт .md пуст"
+
+echo "== backend: PDF отклоняется"
+CODE=$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BACKEND/api/runs" \
+  -F 'before[]=@backend/tests/test_e2e_mock.py;filename=before.pdf;type=application/pdf' \
+  -F 'after[]=@backend/tests/test_e2e_mock.py;filename=after.pdf;type=application/pdf')
+[ "$CODE" = "400" ] || fail "PDF-загрузка дала HTTP $CODE вместо 400"
 
 echo "== backend: ошибки не раскрывают внутренности"
 NOT_FOUND=$(curl -s "$BACKEND/api/does-not-exist")
@@ -54,9 +79,6 @@ fi
 
 echo "== frontend /"
 curl -fsS -o /dev/null -w 'HTTP %{http_code}\n' "$FRONTEND/" || fail "фронтенд не отвечает 2xx"
-
-# ВАЖНО: по мере появления продуктовых эндпоинтов добавлять их сюда же.
-# Сквозной сценарий, который заявлен в README, должен проверяться этим скриптом целиком.
 
 echo
 echo "SMOKE OK (остановить: docker compose down)"
