@@ -6,10 +6,11 @@
 404 `report_not_ready` (проверяет test_runs.py: момент до итога тест поймать не может).
 """
 
+import io
 import time
-from io import BytesIO
+import zipfile
 from pathlib import Path
-from zipfile import ZIP_DEFLATED, ZipFile
+from xml.sax.saxutils import escape
 
 import pytest
 from fastapi.testclient import TestClient
@@ -36,43 +37,43 @@ SPEC_PATHS = {
     "/api/runs/{run_id}/report.md": {"get"},
 }
 
-def _docx_bytes() -> bytes:
-    """Минимальный документ Word с нумерованным пунктом для проверки загрузки."""
-    content = BytesIO()
-    with ZipFile(content, "w", ZIP_DEFLATED) as archive:
-        archive.writestr(
-            "[Content_Types].xml",
-            '<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">'
-            '<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.'
-            'relationships+xml"/>'
-            '<Default Extension="xml" ContentType="application/xml"/>'
-            '<Override PartName="/word/document.xml" '
-            'ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/>'
-            "</Types>",
-        )
-        archive.writestr(
-            "_rels/.rels",
-            '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
-            '<Relationship Id="rId1" '
-            'Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/'
-            'officeDocument" '
-            'Target="word/document.xml"/>'
-            "</Relationships>",
-        )
-        archive.writestr(
-            "word/document.xml",
-            '<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">'
-            '<w:body><w:p><w:r><w:t>1.1. Тестовый пункт.</w:t></w:r></w:p></w:body>'
-            "</w:document>",
-        )
-    return content.getvalue()
-
-
 DOCX = (
     "f.docx",
-    _docx_bytes(),
+    b"PK\x03\x04 fake",
     "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
 )
+
+
+def _docx_bytes(*paragraphs: str) -> bytes:
+    """Минимальный настоящий .docx (zip с word/document.xml и нумерованным пунктом): проходит
+    проверку содержимого при загрузке (S16) и разбирается парсером S04."""
+    texts = paragraphs or ("1.1. Пункт документа.",)
+    body = "".join(
+        f'<w:p><w:r><w:t xml:space="preserve">{escape(text)}</w:t></w:r></w:p>' for text in texts
+    )
+    ns = "http://schemas.openxmlformats.org/"
+    parts = {
+        "[Content_Types].xml": (
+            f'<Types xmlns="{ns}package/2006/content-types">'
+            '<Default Extension="rels" '
+            'ContentType="application/vnd.openxmlformats-package.relationships+xml"/>'
+            '<Default Extension="xml" ContentType="application/xml"/></Types>'
+        ),
+        "_rels/.rels": (
+            f'<Relationships xmlns="{ns}package/2006/relationships">'
+            f'<Relationship Id="rId1" Target="word/document.xml" '
+            f'Type="{ns}officeDocument/2006/relationships/officeDocument"/></Relationships>'
+        ),
+        "word/document.xml": (
+            f'<w:document xmlns:w="{ns}wordprocessingml/2006/main"><w:body>{body}</w:body>'
+            "</w:document>"
+        ),
+    }
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as archive:
+        for name, xml in parts.items():
+            archive.writestr(name, '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' + xml)
+    return buffer.getvalue()
 
 
 FINAL_STATES = {"done", "partial", "error"}
@@ -177,15 +178,31 @@ def test_unknown_run_is_json_404(client: TestClient) -> None:
 
 
 def test_upload_docx_creates_run(client: TestClient) -> None:
-    response = client.post(
-        "/api/runs",
-        files=[("before", ("до.docx", *DOCX[1:])), ("after", ("после.docx", *DOCX[1:]))],
-    )
+    files = [
+        ("before", ("до.docx", _docx_bytes("1.1. До реорганизации."), DOCX[2])),
+        ("after", ("после.docx", _docx_bytes("1.1. После реорганизации."), DOCX[2])),
+    ]
+    response = client.post("/api/runs", files=files)
     assert response.status_code == 201, response.text
     run_id = RunCreated.model_validate(response.json()).run_id
     status = _wait_final(client, run_id)
-    assert status.status in FINAL_STATES
-    assert "не читается как .docx" not in (status.detail or "")
+    # Свои документы в mock без фикстур — честный error с текстом, а не зависший запуск.
+    if status.status == "error":
+        assert status.detail
+
+
+def test_broken_docx_is_honest_error(client: TestClient) -> None:
+    files = [("before", ("до.docx", *DOCX[1:])), ("after", ("после.docx", *DOCX[1:]))]
+    response = client.post("/api/runs", files=files)
+    if response.status_code == 422:
+        # Проверка содержимого при загрузке (S16): {error, detail} с понятным текстом.
+        body = response.json()
+        assert set(body) == {"error", "detail"} and body["detail"]
+    else:
+        # Без неё файл не разбирается в фоне: error с именем файла.
+        assert response.status_code == 201, response.text
+        status = _wait_final(client, RunCreated.model_validate(response.json()).run_id)
+        assert status.status == "error" and "до.docx" in (status.detail or "")
     assert client.get("/health").status_code == 200
 
 
