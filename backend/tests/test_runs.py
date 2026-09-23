@@ -5,13 +5,16 @@
 шагов (pipeline.MODULES) — так тест не зависит от порядка мержа соседей.
 """
 
+import io
 import json
 import sys
 import time
 import types
 import typing
+import zipfile
 from collections.abc import Iterator
 from pathlib import Path
+from xml.sax.saxutils import escape
 
 import pytest
 from fastapi.testclient import TestClient
@@ -47,6 +50,38 @@ ALL_STEPS = [
     "conclusion",
 ]
 DOCX_MIME = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+
+
+def docx_bytes(*paragraphs: str) -> bytes:
+    """Минимальный настоящий .docx (zip с word/document.xml и нумерованным пунктом): проходит
+    проверку содержимого при загрузке (S16) и разбирается парсером S04."""
+    texts = paragraphs or ("1.1. Пункт документа.",)
+    body = "".join(
+        f'<w:p><w:r><w:t xml:space="preserve">{escape(text)}</w:t></w:r></w:p>' for text in texts
+    )
+    ns = "http://schemas.openxmlformats.org/"
+    parts = {
+        "[Content_Types].xml": (
+            f'<Types xmlns="{ns}package/2006/content-types">'
+            '<Default Extension="rels" '
+            'ContentType="application/vnd.openxmlformats-package.relationships+xml"/>'
+            '<Default Extension="xml" ContentType="application/xml"/></Types>'
+        ),
+        "_rels/.rels": (
+            f'<Relationships xmlns="{ns}package/2006/relationships">'
+            f'<Relationship Id="rId1" Target="word/document.xml" '
+            f'Type="{ns}officeDocument/2006/relationships/officeDocument"/></Relationships>'
+        ),
+        "word/document.xml": (
+            f'<w:document xmlns:w="{ns}wordprocessingml/2006/main"><w:body>{body}</w:body>'
+            "</w:document>"
+        ),
+    }
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as archive:
+        for name, xml in parts.items():
+            archive.writestr(name, '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' + xml)
+    return buffer.getvalue()
 
 
 @pytest.fixture
@@ -199,9 +234,19 @@ def fake_modules(monkeypatch: pytest.MonkeyPatch, calls: dict, **overrides) -> N
     def find_duplicate_candidates(functions, k=5):
         return [(functions[0], functions[1], 0.7)]
 
-    def verify_matches(before, after, candidates, llm, after_clauses=None):
+    def verify_matches(
+        before,
+        after,
+        candidates,
+        llm,
+        after_clauses=None,
+        *,
+        before_clauses=None,
+        unit_changes=None,
+    ):
         assert all(f.modality != "prohibition" for f in before)
         assert after_clauses, "пункты «после» передаются для confirm_loss"
+        calls["verify_context"] = (before_clauses, unit_changes)
         f1, g1 = before[0], after[0]
         invented = f1.sources[0].model_copy(update={"clause_number": "9.9.9"})
         return [
@@ -231,8 +276,9 @@ def fake_modules(monkeypatch: pytest.MonkeyPatch, calls: dict, **overrides) -> N
             ),
         ]
 
-    def find_duplicates(functions_by_unit, llm, candidate_pairs=None):
+    def find_duplicates(functions_by_unit, llm, candidate_pairs=None, *, unit_names=None):
         calls["duplicate_pairs"] = candidate_pairs
+        calls["duplicate_unit_names"] = unit_names
         a, b, score = candidate_pairs[0]
         return [
             Duplicate(
@@ -246,8 +292,9 @@ def fake_modules(monkeypatch: pytest.MonkeyPatch, calls: dict, **overrides) -> N
             )
         ]
 
-    def find_conflicts(functions_by_unit, llm, constraints=None):
+    def find_conflicts(functions_by_unit, llm, constraints=None, *, unit_names=None):
         calls["constraints"] = [c.id for c in constraints or []]
+        calls["conflict_unit_names"] = unit_names
         f = functions_by_unit["u9"][0]
         return [
             Conflict(
@@ -385,6 +432,12 @@ def test_all_steps_present_gives_done(client: TestClient, monkeypatch: pytest.Mo
     assert sorted(c.id for c in report.constraints) == ["p8", "p9"]
     assert calls["constraints"] == ["p9"]
     assert calls["duplicate_pairs"] and calls["facts"] == {"findings": 2}
+    # S10 получает пункты «до» и карту подразделений, S11 — названия подразделений.
+    before_clauses, unit_changes = calls["verify_context"]
+    assert [c.number for c in before_clauses] == ["1.1", "2.4.1", "2.4.2", "5.9.1"]
+    assert [c.id for c in unit_changes] == ["uc1"]
+    names = {"u8": "БВА", "u9": "БВА"}
+    assert calls["duplicate_unit_names"] == calls["conflict_unit_names"] == names
     assert report.conclusion_md == "Функции сохранены [F1]."
     assert report.recommendations == ["Проверить [F2]"]
     stats = report.stats
@@ -471,10 +524,32 @@ def test_missing_mock_fixture_is_error_with_key_hint(
     assert "units" in status.missing_steps
 
 
+def test_conclusion_llm_error_keeps_report_as_partial(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def write_conclusion(facts, llm):
+        raise LLMError("нет mock-фикстуры: ожидался файл mocks/write_conclusion/abc123.json")
+
+    fake_modules(monkeypatch, {}, conclusion={"write_conclusion": write_conclusion})
+    run_id = run_demo(client)
+    status, _ = wait_final(client, run_id)
+    # Проверенные находки не пропадают из-за сбоя модели на последнем шаге: partial, не error.
+    assert status.status == "partial", status.detail
+    assert status.missing_steps == ["conclusion"]
+    assert "Нет фикстуры mocks/write_conclusion/abc123.json" in (status.detail or "")
+    report = Report.model_validate(client.get(f"/api/runs/{run_id}/report").json())
+    assert_honest_report(report)
+    assert report.unit_changes and report.function_matches
+    assert report.conclusion_md.startswith("Заключение не сформировано.")
+    assert "ключ OpenAI" in report.conclusion_md and report.recommendations == []
+    md = client.get(f"/api/runs/{run_id}/report.md")
+    assert "Заключение не сформировано." in md.text
+
+
 def test_step_exception_is_partial_and_process_survives(
     client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    def find_conflicts(functions_by_unit, llm, constraints=None):
+    def find_conflicts(functions_by_unit, llm, constraints=None, **_):
         raise KeyError("u9")
 
     fake_modules(monkeypatch, {}, conflicts={"find_conflicts": find_conflicts})
@@ -534,8 +609,8 @@ def test_upload_with_bracket_fields_saves_files_and_runs(
     response = client.post(
         "/api/runs",
         files=[
-            ("before[]", ("../до.docx", b"PK\x03\x04 before", DOCX_MIME)),
-            ("after[]", ("после.docx", b"PK\x03\x04 after", DOCX_MIME)),
+            ("before[]", ("../до.docx", docx_bytes("1.1. До."), DOCX_MIME)),
+            ("after[]", ("после.docx", docx_bytes("1.1. После."), DOCX_MIME)),
         ],
     )
     assert response.status_code == 201, response.text
@@ -544,7 +619,7 @@ def test_upload_with_bracket_fields_saves_files_and_runs(
     assert status.status == "done", status.detail
     assert calls["parsed"] == [("до.docx", "before"), ("после.docx", "after")]
     saved = store.run_dir(run_id)
-    assert (saved / "before" / "01_до.docx").read_bytes() == b"PK\x03\x04 before"
+    assert (saved / "before" / "01_до.docx").read_bytes() == docx_bytes("1.1. До.")
     assert (saved / "after" / "01_после.docx").is_file()
     assert (saved.parent / f"{run_id}.json").is_file(), "дамп запуска в runtime_dir"
 
@@ -570,7 +645,7 @@ def _match(mid: str, before: list[Function], after: list[Function], sources: lis
 def test_source_check_verifies_quote_clause_id_and_both_sides(
     client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    def verify_matches(before, after, candidates, llm, after_clauses=None):
+    def verify_matches(before, after, candidates, llm, after_clauses=None, **_):
         f1, f2 = before[0], before[1]
         g1, g2 = after[0], after[1]
         real = f1.sources[0]  # d8, п. 2.4.1
@@ -683,9 +758,9 @@ def test_several_documents_per_version_reach_units_step(
     response = client.post(
         "/api/runs",
         files=[
-            ("before[]", ("положение.docx", b"PK\x03\x04 a", DOCX_MIME)),
-            ("before[]", ("ди.docx", b"PK\x03\x04 b", DOCX_MIME)),
-            ("after[]", ("положение-9.docx", b"PK\x03\x04 c", DOCX_MIME)),
+            ("before[]", ("положение.docx", docx_bytes("1.1. Положение."), DOCX_MIME)),
+            ("before[]", ("ди.docx", docx_bytes("1.1. Должностная инструкция."), DOCX_MIME)),
+            ("after[]", ("положение-9.docx", docx_bytes("1.1. Положение, ред. 9."), DOCX_MIME)),
         ],
     )
     assert response.status_code == 201, response.text
