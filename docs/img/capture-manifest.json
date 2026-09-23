@@ -1,39 +1,37 @@
 {
   "session": "S20",
   "captured_on": "2026-09-23",
-  "code_commit": "a366f912fbb59f918b59cb2ba0d2e8ee9d908476",
+  "code_commit": "7b83ed2",
   "mode": "mock",
   "frontend_fixture_override": false,
-  "run_id": "6c3ee6ab305d",
+  "run_id": "16afa83127a5",
   "run_status": {
-    "run_id": "6c3ee6ab305d",
-    "status": "partial",
+    "run_id": "16afa83127a5",
+    "status": "done",
     "progress": 100,
-    "detail": "Анализ выполнен частично, не выполнены шаги «Заключение». Причина — Заключение: Нет фикстуры mocks/write_conclusion/9797d28e3f1f75e5.json., для своих документов нужен ключ OpenAI в .env (OPENAI_API_KEY и LLM_MODE=live). Шаг: «Заключение»..",
-    "missing_steps": [
-      "conclusion"
-    ]
+    "detail": "Анализ завершён.",
+    "missing_steps": []
   },
   "stats": {
     "units_before": 4,
     "units_after": 6,
-    "functions_before": 177,
-    "functions_after": 172,
-    "matches": 222,
-    "lost": 0,
-    "new": 6,
-    "duplicates": 0,
+    "functions_before": 228,
+    "functions_after": 216,
+    "matches": 209,
+    "lost": 2,
+    "new": 26,
+    "duplicates": 12,
     "conflicts": 0,
-    "unverified_candidates": 200,
+    "unverified_candidates": 3,
     "units_kept": 3,
-    "units_transformed": 1,
-    "units_created": 3,
+    "units_transformed": 2,
+    "units_created": 1,
     "units_abolished": 0,
-    "kept": 122,
-    "changed": 0,
-    "moved": 5,
-    "constraints": 22,
-    "skipped": 1
+    "kept": 126,
+    "changed": 41,
+    "moved": 11,
+    "constraints": 28,
+    "skipped": 0
   },
   "documents": [
     {
@@ -47,21 +45,25 @@
   ],
   "source_panel": {
     "version": "before",
-    "clause_number": "5.3.2",
-    "quote": "готовит предложения для включения в план работ БВА;",
+    "clause_number": "3.1",
+    "quote": "Штатная численность подразделений, входящих в БВА Общества, определяется штатным расписанием, которое утверждается Президентом Общества, исходя из функций и объема работ, возложенных на указанные подразделения.",
     "api_status": 200
   },
   "privacy_review": "Визуально проверены: секретов, персональных путей, личных данных в кадре не обнаружено.",
   "visually_reviewed_sha256": {
-    "01-upload.png": "f2e26ca34bcd770df6d091d1823a92d13fa698b85f54d84c0de48e6bafbbb45a",
-    "02-progress.png": "4aa0e2056c0ef260e25b78c36eaa8dfb669f77153c2dfa897492411b26a1090c",
-    "03-units-overview.png": "b60ad452f433ed1c165e62d2de7fae769abfc4c9cdb2b214ac5cb6447eb183e4",
-    "03-units.png": "f60701cb1170abb9a2585470e153b4ee176401e1d624fdd4f2d024b0ad794572",
-    "04-functions-new.png": "47e50af682b8c6f8ac0bf65b6bb75f44c488652ac28d24870bdabb8ad05c2236",
-    "04-functions.png": "dea7d283625dd3eee126e694622ae0af36d833e6fb610c216297a225deddf622",
-    "05-conflicts.png": "0df5f8b0e9d350eec71222f91fede5edb4fad1a07bf42cc75e2b786100ebf03f",
-    "06-source.png": "f12a700d726cbff1f1e5f89aa9cac569d7176dc3908ad761d18a54d12dee4421",
-    "07-conclusion.png": "c1e976b11b0d43abaea8fd4025e223de8c0c762ec4adf012967e6ae45e443c34",
-    "architecture.png": "85e8b9387844c20809aacfb799b911f92d81197ae002685eb5c6a660cb1adbf0"
+    "05-conflicts.png": "c31c862fb523004d2b8bffdccf91ce1faf47bc27b6f6f178ee19920e65a8865d",
+    "07-conclusion.png": "dde9ed2814bfac98d73eee721b207059fb36d3599bddc8abcedf00103c3c5b1f",
+    "06-source.png": "fb39e50cb35cb45b589af689ea7947fc96b2f28cee3a29cfef230c38de4f0b20",
+    "04-functions.png": "d8a65c6452f190534abe50dc01f7be3a1843df6991efb2425324138b62282547",
+    "03-units.png": "c42fd7b5e39f159196cb37452c7074913641578d65490731168c339ff5d9c573",
+    "architecture.png": "85e8b9387844c20809aacfb799b911f92d81197ae002685eb5c6a660cb1adbf0",
+    "04-functions-new.png": "3d151bfb47dba4061b0f51013975f3321f6aa16768b655307d9f61d4755c16eb",
+    "02-progress.png": "7672c6b509030e6def4ae4ef9c2afed5f509165f46a3538b6cc3f2f6677562a1",
+    "03-units-overview.png": "6d7369ea97f74ac7a4d58df873495f34b31aa384d16ff96b00f367be4e547a0b",
+    "01-upload.png": "963d8d607b23598aae0f62aa5fcda2d047a8f798314dda3705d3adf2d8252715"
+  },
+  "capture_code_commits": {
+    "tables": "a42d45a",
+    "conclusion": "7b83ed2"
   }
 }
