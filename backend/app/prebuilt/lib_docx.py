@@ -14,13 +14,13 @@ Pass B (verb_canonical, work_nature, canonical_function_id).
 Запуск как утилита:
   py scripts/lib_docx.py "<path.docx>"      # печать сегментированной структуры
 """
+
 from __future__ import annotations
 
 import re
 import sys
 import zipfile
 from pathlib import Path
-
 
 # ── низкоуровневое извлечение абзацев ───────────────────────────────────────
 # Каждый абзац → {"text": str, "list": bool}. Флаг list=True означает, что Word
@@ -40,6 +40,7 @@ def para_objs(path) -> list[dict]:
     path = str(path)
     try:
         import docx  # python-docx
+
         d = docx.Document(path)
         out = []
         for p in d.paragraphs:
@@ -61,15 +62,16 @@ def para_objs(path) -> list[dict]:
                         continue
                     seen_tc.add(tc_id)
                     cps = [pp for pp in c.paragraphs if pp.text.strip()]
-                    if len(cps) >= 2:                       # контентная ячейка
+                    if len(cps) >= 2:  # контентная ячейка
                         for pp in cps:
                             t = pp.text.strip()
                             if _norm0(t) not in _FOOTER:
                                 out.append({"text": t, "list": _is_list_item(pp)})
-                    elif len(cps) == 1:                     # однострочная — в строку
+                    elif len(cps) == 1:  # однострочная — в строку
                         t = cps[0].text.strip()
                         if t and t not in seen_txt and _norm0(t) not in _FOOTER:
-                            seen_txt.add(t); singles.append(t)
+                            seen_txt.add(t)
+                            singles.append(t)
                 if singles:
                     out.append({"text": "\t".join(singles), "list": False})
         return out
@@ -98,21 +100,30 @@ def _paragraphs_zip(path) -> list[dict]:
     xml = re.sub(r"</w:p>", "\n", xml)
     xml = re.sub(r"<w:tab[^>]*/>", "\t", xml)
     xml = re.sub(r"<[^>]+>", "", xml)
-    return [{"text": ln.strip(), "list": False}
-            for ln in xml.split("\n") if ln.strip()]
+    return [{"text": ln.strip(), "list": False} for ln in xml.split("\n") if ln.strip()]
 
 
 # ── распознавание заголовков секций ─────────────────────────────────────────
 SECTIONS = {
     "general": ["общие положения"],
-    "qualification": ["квалификационные требования", "квалификационным требованиям",
-                      "требования к квалификации"],
-    "duties": ["должностные обязанности", "функциональные обязанности",
-               "должностные обязанности и функции"],
+    "qualification": [
+        "квалификационные требования",
+        "квалификационным требованиям",
+        "требования к квалификации",
+    ],
+    "duties": [
+        "должностные обязанности",
+        "функциональные обязанности",
+        "должностные обязанности и функции",
+    ],
     "rights": ["права"],
     "responsibility": ["ответственность"],
-    "interaction": ["взаимодействие", "взаимоотношения", "служебные взаимоотношения",
-                    "связи по должности"],
+    "interaction": [
+        "взаимодействие",
+        "взаимоотношения",
+        "служебные взаимоотношения",
+        "связи по должности",
+    ],
 }
 # заголовок секции = (опц. номер) + название, коротко (без двоеточия-перечня)
 _SECTION_NUM = re.compile(r"^\s*(\d+)\.?\s*")
@@ -139,11 +150,12 @@ def match_section(line: str):
 
 # сфера внутри обязанностей. Номер может отсутствовать (директор ДАиУК:
 # «К должностным обязанностям директора … относятся:» без номера и в виде списка).
-_SPHERE_DUTY = re.compile(r"к (?:должностным|функциональным) обязанностям .*относятся$",
-                          re.IGNORECASE)
+_SPHERE_DUTY = re.compile(
+    r"к (?:должностным|функциональным) обязанностям .*относятся$", re.IGNORECASE
+)
 _SPHERE_AREA = re.compile(
-    r"(?:в сфере|в области|в части|в рамках|в системе|по вопросам|по направлению) .+",
-    re.IGNORECASE)
+    r"(?:в сфере|в области|в части|в рамках|в системе|по вопросам|по направлению) .+", re.IGNORECASE
+)
 _SPHERE_KNOW = re.compile(r"должен (?:знать|уметь)\b", re.IGNORECASE)
 
 
@@ -165,6 +177,7 @@ def match_sphere(line: str):
         return ("area", f"{num + '. ' if num else ''}{label}")
     return None
 
+
 # атомарный пункт: «1)», «1.», «1.1)», «-», «•», «–»
 ITEM_RE = re.compile(r"^\s*(\d+[.)]|\d+\.\d+[.)]?|[-–•·▪])\s+(.*)$")
 ENUM_ONLY = re.compile(r"^\s*(\d+[.)]|[-–•·▪])\s*$")
@@ -174,14 +187,20 @@ ENUM_ONLY = re.compile(r"^\s*(\d+[.)]|[-–•·▪])\s*$")
 DOC_CODE_RE = re.compile(r"(ДИ[-\s]?[А-ЯA-Z]{0,4}[-\s]?\d+\.\d+/\d+[-–]\d+)")
 APPROVAL_RE = re.compile(r"(Утвержден[ао].{0,80}?(?:Приказ|приказом).{0,80})", re.IGNORECASE)
 REPORTS_RE = re.compile(r"подчин\w+\s+(?:непосредственно\s+)?([^.,;\n]{3,80})", re.IGNORECASE)
-SUBST_RE = re.compile(r"обязанности\s+(?:возлагаются|исполня\w+)\s+(?:на|)\s*([^.,;\n]{3,90})",
-                      re.IGNORECASE)
+SUBST_RE = re.compile(
+    r"обязанности\s+(?:возлагаются|исполня\w+)\s+(?:на|)\s*([^.,;\n]{3,90})", re.IGNORECASE
+)
 
 
 def harvest_meta(paras: list[str]) -> dict:
     text = "\n".join(paras)
-    meta = {"doc_code": "", "approval": "", "reports_to": "", "substituted_by": "",
-            "title_guess": ""}
+    meta = {
+        "doc_code": "",
+        "approval": "",
+        "reports_to": "",
+        "substituted_by": "",
+        "title_guess": "",
+    }
     m = DOC_CODE_RE.search(text)
     if m:
         meta["doc_code"] = m.group(1).strip()
@@ -196,9 +215,25 @@ def harvest_meta(paras: list[str]) -> dict:
         meta["substituted_by"] = m.group(1).strip()
     # заголовок-должность: первая строка с «специалист/директор/…» рядом с кодом ДИ,
     # либо строка после слова ДОЛЖНОСТНАЯ ИНСТРУКЦИЯ
-    RANKS = ("директор", "руководител", "начальник", "специалист", "методист",
-             "менеджер", "инженер", "секретар", "оператор", "фотограф", "дизайнер",
-             "заведующ", "лаборант", "техник", "экономист", "бухгалтер", "юрист")
+    RANKS = (
+        "директор",
+        "руководител",
+        "начальник",
+        "специалист",
+        "методист",
+        "менеджер",
+        "инженер",
+        "секретар",
+        "оператор",
+        "фотограф",
+        "дизайнер",
+        "заведующ",
+        "лаборант",
+        "техник",
+        "экономист",
+        "бухгалтер",
+        "юрист",
+    )
     for p in paras[:40]:
         pl = p.lower()
         if any(r in pl for r in RANKS) and 4 <= len(p) <= 90 and "должностная инструкц" not in pl:
@@ -248,8 +283,9 @@ def _drop_toc(objs: list[dict]) -> list[dict]:
             skip = True
             continue
         if skip:
-            if match_section(o["text"]) == "general" or \
-               _norm(o["text"]).startswith("общие положения"):
+            if match_section(o["text"]) == "general" or _norm(o["text"]).startswith(
+                "общие положения"
+            ):
                 skip = False
                 out.append(o)
             continue
@@ -299,9 +335,9 @@ def _parse_duties(objs: list[dict]) -> tuple[list[dict], list[str]]:
             add_item(mi.group(1).rstrip(".)"), mi.group(2).strip())
         elif ENUM_ONLY.match(ln):
             continue
-        elif is_list:                       # авто-нумерованный пункт без печатного №
+        elif is_list:  # авто-нумерованный пункт без печатного №
             add_item(seq + 1, ln.strip())
-        elif cur["items"]:                  # продолжение предыдущего пункта (перенос)
+        elif cur["items"]:  # продолжение предыдущего пункта (перенос)
             cur["items"][-1]["text"] = (cur["items"][-1]["text"] + " " + ln.strip()).strip()
         # иначе: вводный абзац до первого пункта — игнор
     flush()
@@ -348,17 +384,19 @@ def _main(argv):
     print(f"  reports_to: {m['reports_to']}")
     print(f"  substituted_by: {m['substituted_by']}")
     print(f"  qualification items: {len(r['qualification'])}")
-    nfun = sum(len(s['items']) for s in r['duties'])
+    nfun = sum(len(s["items"]) for s in r["duties"])
     print(f"  DUTIES: {len(r['duties'])} spheres, {nfun} atomic functions")
     for sph in r["duties"]:
         print(f"    ── [{sph['sphere']}]  ({len(sph['items'])})")
         for it in sph["items"][:3]:
             print(f"        {it['num']}) {it['text'][:96]}")
         if len(sph["items"]) > 3:
-            print(f"        … +{len(sph['items'])-3} ещё")
+            print(f"        … +{len(sph['items']) - 3} ещё")
     print(f"  knowledge(должен знать): {len(r['knowledge'])}")
-    print(f"  rights: {len(r['rights'])}  responsibility: {len(r['responsibility'])}"
-          f"  interaction-lines: {len(r['interaction'])}")
+    print(
+        f"  rights: {len(r['rights'])}  responsibility: {len(r['responsibility'])}"
+        f"  interaction-lines: {len(r['interaction'])}"
+    )
     return 0
 
 
