@@ -41,20 +41,20 @@ from app.rules import (
 )
 from app.schemas import Duplicate, Function
 
-try:  # S13 держит общие схемы LLM-вызовов; до его мержа — своя модель с теми же полями
-    from app.llm_schemas import VerifyDuplicatesOut  # type: ignore[import-not-found]
-except ImportError:  # pragma: no cover - зависит от порядка мержа волны 3
 
-    class VerifyDuplicatesOut(BaseModel):  # type: ignore[no-redef]
-        """Ответ `verify_duplicates` (spec §5)."""
+class VerifyDuplicatesOut(BaseModel):
+    """Ответ `verify_duplicates` (spec §5). Поля и strict-схема — как в `app.llm_schemas` (S13),
+    но своя модель без валидатора согласованности: противоречивый ответ (is_duplicate=true без
+    всех признаков) должен дойти до `_answer_problem` и стать «требует проверки: ответ проверки
+    противоречив», а не «нет ответа проверки» из-за ошибки схемы."""
 
-        model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid")
 
-        is_duplicate: bool
-        same_action: bool
-        same_object: bool
-        both_executors: bool
-        verification_note: str
+    is_duplicate: bool
+    same_action: bool
+    same_object: bool
+    both_executors: bool
+    verification_note: str
 
 
 logger = logging.getLogger(__name__)
