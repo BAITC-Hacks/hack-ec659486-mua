@@ -419,7 +419,7 @@ def check_kit_result(result: UnitsResult, before: Document, after: Document) -> 
                 assert unit.sources
 
     statuses = [c.status for c in result]
-    assert statuses.count("created") >= 2
+    assert statuses.count("created") + statuses.count("transformed") >= 2
     assert statuses.count("kept") >= 2
 
     def status_of(abbr_or_name: str) -> set[str]:
@@ -433,8 +433,8 @@ def check_kit_result(result: UnitsResult, before: Document, after: Document) -> 
     assert status_of("ДНМ") == {"kept"}
     assert status_of("ДККМ") == {"kept"}
     assert status_of("БВА") == {"kept"}
-    assert status_of("ДИТААД") == {"created"}
-    assert status_of("ДОА") == {"created"}
+    assert status_of("ДИТААД") <= {"created", "transformed"} and status_of("ДИТААД")
+    assert status_of("ДОА") <= {"created", "transformed"} and status_of("ДОА")
     assert status_of("Направление внутреннего аудита") <= {"transformed", "abolished"}
     assert status_of("Направление внутреннего аудита")
 

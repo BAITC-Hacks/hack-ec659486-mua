@@ -390,9 +390,10 @@ FS_PROC = function(
 
 
 @pytest.fixture
-def llm(monkeypatch: pytest.MonkeyPatch) -> Iterator[LLM]:
+def llm(monkeypatch: pytest.MonkeyPatch, tmp_path) -> Iterator[LLM]:
     monkeypatch.setenv("LLM_MODE", "mock")
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    monkeypatch.setattr(cand_mod, "EMBEDDINGS_DIR", tmp_path / "embeddings")
     get_settings.cache_clear()
     yield LLM(get_settings())
     get_settings.cache_clear()
