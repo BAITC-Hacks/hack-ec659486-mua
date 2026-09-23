@@ -49,10 +49,7 @@ while :; do
     <<<"$RUN_STATUS") || fail "неверный ответ статуса: $RUN_STATUS"
   case "$STATE" in
     done) break ;;
-    partial)
-      echo "Анализ завершён частично. missing_steps: $(python3 -c \
-        'import json,sys; print(json.load(sys.stdin).get("missing_steps", []))' <<<"$RUN_STATUS")"
-      break ;;
+    partial) fail "анализ завершился частично: $RUN_STATUS" ;;
     error) fail "анализ завершился ошибкой: $RUN_STATUS" ;;
   esac
   [ $SECONDS -lt $RUN_DEADLINE ] || fail "анализ не завершился за 120 с: $RUN_STATUS"
